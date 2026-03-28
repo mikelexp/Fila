@@ -1,9 +1,11 @@
 #!/bin/bash
 # Script de compilación con Nuitka para MKVideoPlaylister
+# Genera un único binario autocontenido. Dependencias del sistema requeridas
+# en la máquina destino: libmpv.so (mpv), libmpv.so (preview), ffprobe (duraciones).
 
 set -e
 
-echo "=== Compilando MKVideoPlaylister con Nuitka ==="
+echo "=== Compilando MKVideoPlaylister con Nuitka (onefile) ==="
 
 # Verificar que estemos en el directorio correcto
 if [ ! -f "mk_playlister.py" ]; then
@@ -11,7 +13,7 @@ if [ ! -f "mk_playlister.py" ]; then
     exit 1
 fi
 
-# Verificar que patchelf esté instalado
+# Verificar que patchelf esté instalado (requerido por Nuitka en Linux)
 if ! command -v patchelf &> /dev/null; then
     echo "Error: patchelf no está instalado"
     echo ""
@@ -38,16 +40,30 @@ if ! python -c "import nuitka" 2>/dev/null; then
 fi
 
 echo ""
-echo "Compilando con Nuitka..."
+echo "Compilando con Nuitka (modo onefile)..."
 echo "Esto puede tomar varios minutos..."
 echo ""
 
 # Limpiar compilaciones anteriores
-rm -rf dist/mkplaylister.dist mkplaylister.build mkplaylister.onefile-build
+rm -rf dist/mkplaylister mkplaylister.build mkplaylister.onefile-build
 
-# Compilar con Nuitka (modo standalone)
+mkdir -p dist
+
+# Compilar con Nuitka en modo onefile.
+#
+# --onefile-tempdir-spec="{CACHE_DIR}/mkplaylister"
+#   Extrae a ~/.cache/mkplaylister/ la primera vez y reutiliza el caché
+#   en ejecuciones posteriores (no re-extrae si el binario no cambió).
+#   Esto evita la penalización de extracción en cada arranque.
+#
+# Dependencias que quedan fuera (del sistema):
+#   - libmpv.so.2  → provista por el paquete mpv del sistema
+#   - libGL / libX11 / libc / etc. → bibliotecas estándar del sistema
+#   - ffprobe → ejecutable externo (detección de duración)
+#   - mpv/vlc/mplayer → reproductores externos
 python -m nuitka \
-    --standalone \
+    --onefile \
+    --onefile-tempdir-spec="{CACHE_DIR}/mkplaylister" \
     --enable-plugin=pyside6 \
     --output-filename=mkplaylister \
     --output-dir=dist \
@@ -57,10 +73,15 @@ python -m nuitka \
 echo ""
 echo "=== Compilación completada ==="
 echo ""
-echo "Ejecutable creado en: ./dist/mkplaylister.dist/mkplaylister"
+echo "Binario único creado en: ./dist/mkplaylister"
+echo ""
+echo "Dependencias requeridas en el sistema destino:"
+echo "  - libmpv.so.2  (paquete mpv)"
+echo "  - ffprobe      (paquete ffmpeg, para duración de videos)"
+echo "  - mpv/vlc      (reproductores para la función Play)"
 echo ""
 echo "Para probarlo:"
-echo "  ./dist/mkplaylister.dist/mkplaylister"
+echo "  ./dist/mkplaylister"
 echo ""
 echo "Para instalar en el sistema:"
 echo "  ./install.sh"

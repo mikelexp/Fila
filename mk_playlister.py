@@ -28,17 +28,54 @@ from PySide6.QtWidgets import (
 
 FILE_TYPES: dict[str, set[str]] = {
     "Videos": {
-        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
-        ".m4v", ".mpg", ".mpeg", ".ts", ".mts", ".m2ts", ".vob",
-        ".3gp", ".ogv", ".rm", ".rmvb",
+        # MPEG / H.26x
+        ".mp4", ".m4v", ".m4p", ".mpg", ".mpeg", ".mpe", ".m1v", ".m2v",
+        ".m2p", ".h264", ".264", ".h265", ".265", ".hevc",
+        # Matroska
+        ".mkv", ".mk3d", ".mks", ".webm",
+        # AVI / DivX
+        ".avi", ".divx",
+        # QuickTime / Apple
+        ".mov", ".qt",
+        # Windows
+        ".wmv", ".wm", ".asf",
+        # Flash
+        ".flv", ".f4v", ".f4p",
+        # OGG
+        ".ogv", ".ogg",
+        # Transport streams
+        ".ts", ".mts", ".m2ts", ".tp", ".trp",
+        # DVD / Blu-ray
+        ".vob", ".ifo",
+        # Mobile / 3GPP
+        ".3gp", ".3g2", ".3gpp",
+        # RealMedia
+        ".rm", ".rmvb", ".ram",
+        # Misc
+        ".dv", ".nsv", ".amv", ".mxf", ".roq", ".svi", ".mjpg", ".mjpeg",
+        ".yuv", ".nut",
     },
     "Images": {
         ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif",
         ".webp", ".svg", ".ico", ".heic", ".heif", ".avif",
+        ".jxl", ".psd", ".raw", ".cr2", ".cr3", ".nef", ".arw",
+        ".dng", ".orf", ".rw2", ".pnm", ".pbm", ".pgm", ".ppm",
+        ".xpm", ".tga", ".exr", ".hdr",
     },
     "Audio": {
-        ".mp3", ".flac", ".wav", ".aac", ".ogg", ".opus", ".m4a",
-        ".wma", ".aiff", ".ape", ".mka",
+        # Lossy
+        ".mp3", ".mp2", ".mp1", ".aac", ".ogg", ".oga", ".opus",
+        ".wma", ".ra", ".amr", ".3ga",
+        # Lossless
+        ".flac", ".wav", ".wave", ".aiff", ".aif", ".aifc",
+        ".ape", ".wv", ".tta", ".tak",
+        # Containers
+        ".m4a", ".mka", ".caf",
+        # Other
+        ".mpc", ".spx", ".ac3", ".dts", ".au", ".snd",
+        ".dsf", ".dff", ".ofr",
+        # Tracker / MIDI
+        ".mid", ".midi", ".mod", ".xm", ".it", ".s3m",
     },
     "All": set(),  # empty = no extension filter
 }
@@ -75,6 +112,13 @@ def _load_config() -> dict:
 def _save_config(data: dict) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(data, indent=2))
+
+
+def _update_config(**kwargs) -> None:
+    """Merge kwargs into the existing config and save."""
+    data = _load_config()
+    data.update(kwargs)
+    _save_config(data)
 
 # ── Sortable table item ───────────────────────────────────────────────────────
 
@@ -404,8 +448,8 @@ class MainWindow(QMainWindow):
     # ── Connect signals ───────────────────────────────────────────────────────
 
     def _connect(self):
-        self.btn_go.clicked.connect(lambda: self._navigate(self.path_edit.text().strip()))
-        self.path_edit.returnPressed.connect(lambda: self._navigate(self.path_edit.text().strip()))
+        self.btn_go.clicked.connect(lambda: self._navigate(self.path_edit.text().strip(), scroll=True))
+        self.path_edit.returnPressed.connect(lambda: self._navigate(self.path_edit.text().strip(), scroll=True))
         self.tree.clicked.connect(self._on_tree_click)
         self.tree.customContextMenuRequested.connect(self._tree_context_menu)
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
@@ -431,7 +475,7 @@ class MainWindow(QMainWindow):
 
     # ── Navigation ────────────────────────────────────────────────────────────
 
-    def _navigate(self, path: str):
+    def _navigate(self, path: str, scroll: bool = False):
         path = os.path.expanduser(path)
         if not os.path.isdir(path):
             self.status_bar.showMessage(f"Not a directory: {path}")
@@ -440,7 +484,14 @@ class MainWindow(QMainWindow):
         self.path_edit.setText(path)
         idx = self.fs_model.index(path)
         self.tree.setCurrentIndex(idx)
-        self.tree.scrollTo(idx)
+        if scroll:
+            self.tree.scrollTo(idx, QAbstractItemView.ScrollHint.PositionAtCenter)
+        self._stop_preview()
+        self._preview_path = ""
+        self.seek_slider.setValue(0)
+        self.lbl_pos.setText("0:00")
+        self.lbl_dur.setText("0:00")
+        self.btn_play_pause.setText("▶")
         self._scan_folder()
 
     def _on_tree_click(self, idx: QModelIndex):
@@ -823,12 +874,12 @@ class MainWindow(QMainWindow):
         if any(bm["path"] == path for bm in self._favorites):
             return
         self._favorites.append({"path": path, "name": Path(path).name or path})
-        _save_config({"favorites": self._favorites})
+        _update_config(favorites=self._favorites)
         self._populate_fav_list()
 
     def _remove_favorite(self, path: str):
         self._favorites = [bm for bm in self._favorites if bm["path"] != path]
-        _save_config({"favorites": self._favorites})
+        _update_config(favorites=self._favorites)
         self._populate_fav_list()
 
     def _rename_favorite(self, path: str):
@@ -840,7 +891,7 @@ class MainWindow(QMainWindow):
         )
         if ok and name.strip():
             bm["name"] = name.strip()
-            _save_config({"favorites": self._favorites})
+            _update_config(favorites=self._favorites)
             self._populate_fav_list()
 
     def _rename_selected_fav(self):
@@ -852,7 +903,7 @@ class MainWindow(QMainWindow):
         self.btn_rename_fav.setEnabled(current is not None)
 
     def _on_fav_click(self, item: QListWidgetItem):
-        self._navigate(item.data(Qt.ItemDataRole.UserRole))
+        self._navigate(item.data(Qt.ItemDataRole.UserRole), scroll=True)
 
     def _fav_context_menu(self, pos: QPoint):
         item = self.fav_list.itemAt(pos)
@@ -881,6 +932,7 @@ class MainWindow(QMainWindow):
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        _update_config(maximized=self.isMaximized())
         self._preview_timer.stop()
         self._stop_worker()
         if self._mpv is not None:
@@ -904,7 +956,10 @@ def main():
     locale.setlocale(locale.LC_NUMERIC, "C")
     app.setStyle("Fusion")
     win = MainWindow()
-    win.show()
+    if _load_config().get("maximized", False):
+        win.showMaximized()
+    else:
+        win.show()
     sys.exit(app.exec())
 
 

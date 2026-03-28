@@ -5,31 +5,19 @@ set -e
 
 echo "=== Instalando MKVideoPlaylister ==="
 
-# Verificar que el ejecutable compilado exista
-if [ ! -f "dist/mkplaylister.dist/mkplaylister" ]; then
-    echo "Error: El ejecutable compilado no existe"
+# Verificar que el binario compilado exista
+if [ ! -f "dist/mkplaylister" ]; then
+    echo "Error: El binario compilado no existe"
     echo "Por favor ejecuta primero: ./build.sh"
     exit 1
 fi
 
-# Crear directorios necesarios
 BIN_DIR="$HOME/.local/bin"
-INSTALL_DIR="$HOME/.local/share/mkplaylister"
 mkdir -p "$BIN_DIR"
-mkdir -p "$INSTALL_DIR"
 
-# Copiar el directorio completo standalone
-echo "Copiando aplicación standalone a $INSTALL_DIR..."
-rm -rf "$INSTALL_DIR"
-cp -r dist/mkplaylister.dist "$INSTALL_DIR"
-chmod +x "$INSTALL_DIR/mkplaylister"
-
-# Crear wrapper script en bin
-echo "Creando launcher en $BIN_DIR..."
-cat > "$BIN_DIR/mkplaylister" << 'EOF'
-#!/bin/bash
-exec "$HOME/.local/share/mkplaylister/mkplaylister" "$@"
-EOF
+# Copiar el binario único
+echo "Copiando binario a $BIN_DIR/mkplaylister..."
+cp dist/mkplaylister "$BIN_DIR/mkplaylister"
 chmod +x "$BIN_DIR/mkplaylister"
 
 # Instalar el icono si existe
@@ -87,6 +75,12 @@ echo ""
 echo "=== Instalación completada ==="
 echo ""
 echo "Ejecutable instalado en: $BIN_DIR/mkplaylister"
+echo "Caché de extracción en:  ~/.cache/mkplaylister/"
 echo ""
 echo "Para ejecutar:"
 echo "  mkplaylister"
+echo ""
+echo "Para desinstalar:"
+echo "  rm $BIN_DIR/mkplaylister"
+echo "  rm -rf ~/.cache/mkplaylister"
+echo "  rm $DESKTOP_DIR/mkplaylister.desktop"
