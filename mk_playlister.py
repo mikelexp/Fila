@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MKVideoPlaylister — browse folders, filter by type, sort, generate .m3u8, play."""
 
+import locale
 import os
 import sys
 import json
@@ -9,13 +10,18 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal, QModelIndex, QDir, QPoint
+locale.setlocale(locale.LC_NUMERIC, "C")
+
+import mpv
+
+from PySide6.QtCore import Qt, QObject, QEvent, QThread, Signal, QModelIndex, QDir, QPoint, QTimer
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QTreeView, QComboBox, QLabel, QPushButton,
     QFileSystemModel, QHeaderView, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QStatusBar, QLineEdit, QFrame, QMessageBox,
-    QListWidget, QListWidgetItem, QMenu,
+    QListWidget, QListWidgetItem, QMenu, QCheckBox, QSlider, QStyle,
+    QInputDialog,
 )
 
 # ── File type definitions ─────────────────────────────────────────────────────
@@ -54,7 +60,14 @@ CONFIG_PATH = Path.home() / ".config" / "mkplaylister" / "mkplaylister.json"
 
 def _load_config() -> dict:
     try:
-        return json.loads(CONFIG_PATH.read_text())
+        data = json.loads(CONFIG_PATH.read_text())
+        # Migrate old format: list of strings → list of dicts
+        favs = data.get("favorites", [])
+        if favs and isinstance(favs[0], str):
+            data["favorites"] = [
+                {"path": p, "name": Path(p).name or p} for p in favs
+            ]
+        return data
     except Exception:
         return {"favorites": []}
 
@@ -137,6 +150,31 @@ def vline() -> QFrame:
     return ln
 
 
+# ── Seek slider that jumps to click position ─────────────────────────────────
+
+class SeekSlider(QSlider):
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            val = QStyle.sliderValueFromPosition(
+                self.minimum(), self.maximum(),
+                event.position().toPoint().x(), self.width(),
+            )
+            self.setValue(val)
+        super().mousePressEvent(event)
+
+
+# ── Thread-safe bridge for mpv → Qt signals ──────────────────────────────────
+
+class _MpvBridge(QObject):
+    """Receives mpv property callbacks (called from mpv's thread) and re-emits
+    them as Qt signals, which Qt queues onto the main thread automatically."""
+    time_pos_changed  = Signal(float)   # current position in seconds
+    duration_changed  = Signal(float)   # total duration in seconds
+    pause_changed     = Signal(bool)    # True = paused
+    mute_changed      = Signal(bool)    # True = muted
+    volume_changed    = Signal(float)   # 0–100
+
+
 # ── Main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
@@ -150,6 +188,14 @@ class MainWindow(QMainWindow):
         self._worker: DurationWorker | None = None
         self._current_folder: str = ""
         self._favorites: list[str] = _load_config().get("favorites", [])
+        self._mpv: mpv.MPV | None = None
+        self._mpv_bridge = _MpvBridge()
+        self._mpv_duration: float = 0.0
+        self._mpv_pos: float = 0.0           # current playback position in preview
+        self._preview_path: str = ""         # file currently loaded in preview
+        self._seeking: bool = False          # True while user drags the slider
+        self._preview_timer = QTimer(singleShot=True, interval=250)
+        self._preview_timer.timeout.connect(self._do_preview)
 
         self._build_ui()
         self._connect()
@@ -186,6 +232,12 @@ class MainWindow(QMainWindow):
         self.type_combo.setCurrentText("Videos")
         self.type_combo.setMinimumWidth(90)
         tb.addWidget(self.type_combo)
+
+        tb.addWidget(vline())
+
+        self.preview_check = QCheckBox("Preview")
+        self.preview_check.setChecked(True)
+        tb.addWidget(self.preview_check)
 
         tb.addWidget(vline())
 
@@ -232,8 +284,15 @@ class MainWindow(QMainWindow):
         fav_header.addStretch()
         self.btn_add_fav = QPushButton("+ Add")
         self.btn_add_fav.setFixedHeight(22)
-        self.btn_add_fav.setToolTip("Add current folder to favorites")
+        self.btn_add_fav.setToolTip("Add current folder to bookmarks")
         fav_header.addWidget(self.btn_add_fav)
+
+        self.btn_rename_fav = QPushButton("Rename")
+        self.btn_rename_fav.setFixedHeight(22)
+        self.btn_rename_fav.setToolTip("Rename selected bookmark")
+        self.btn_rename_fav.setEnabled(False)
+        fav_header.addWidget(self.btn_rename_fav)
+
         left_layout.addLayout(fav_header)
 
         self.fav_list = QListWidget()
@@ -276,7 +335,65 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
-        splitter.addWidget(self.table)
+
+        # ── Preview panel (video area + seek bar) ────────────────────────────
+        self.preview_panel = QWidget()
+        pp_layout = QVBoxLayout(self.preview_panel)
+        pp_layout.setContentsMargins(0, 0, 0, 0)
+        pp_layout.setSpacing(2)
+
+        # Video area — mpv embeds here via XID
+        self.preview_container = QWidget()
+        self.preview_container.setMinimumHeight(60)
+        self.preview_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.preview_container.setStyleSheet("background: black;")
+        self.preview_container.installEventFilter(self)
+        pp_layout.addWidget(self.preview_container, 1)
+
+        # Seek bar row
+        seek_row = QHBoxLayout()
+        seek_row.setContentsMargins(4, 0, 4, 2)
+        seek_row.setSpacing(4)
+
+        self.btn_play_pause = QPushButton("▶")
+        self.btn_play_pause.setFixedSize(28, 22)
+        self.btn_play_pause.setToolTip("Play / Pause")
+        seek_row.addWidget(self.btn_play_pause)
+
+        self.btn_mute = QPushButton("🔇")
+        self.btn_mute.setFixedSize(28, 22)
+        self.btn_mute.setToolTip("Mute / Unmute")
+        seek_row.addWidget(self.btn_mute)
+
+        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vol_slider.setRange(0, 100)
+        self.vol_slider.setValue(100)
+        self.vol_slider.setFixedWidth(80)
+        self.vol_slider.setToolTip("Volume")
+        seek_row.addWidget(self.vol_slider)
+
+        self.lbl_pos = QLabel("0:00")
+        self.lbl_pos.setFixedWidth(42)
+        self.lbl_pos.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        seek_row.addWidget(self.lbl_pos)
+
+        self.seek_slider = SeekSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setRange(0, 10000)
+        self.seek_slider.setValue(0)
+        seek_row.addWidget(self.seek_slider, 1)
+
+        self.lbl_dur = QLabel("0:00")
+        self.lbl_dur.setFixedWidth(42)
+        self.lbl_dur.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        seek_row.addWidget(self.lbl_dur)
+
+        pp_layout.addLayout(seek_row)
+
+        right_splitter = QSplitter(Qt.Orientation.Vertical)
+        right_splitter.addWidget(self.table)
+        right_splitter.addWidget(self.preview_panel)
+        right_splitter.setSizes([420, 220])
+        splitter.addWidget(right_splitter)
 
         splitter.setSizes([240, 860])
         layout.addWidget(splitter, 1)
@@ -295,8 +412,22 @@ class MainWindow(QMainWindow):
         self.play_btn.clicked.connect(self._play)
         self.table.cellDoubleClicked.connect(self._on_double_click)
         self.btn_add_fav.clicked.connect(lambda: self._add_favorite(self._current_folder))
+        self.btn_rename_fav.clicked.connect(self._rename_selected_fav)
         self.fav_list.itemClicked.connect(self._on_fav_click)
+        self.fav_list.currentItemChanged.connect(self._on_fav_selection_changed)
         self.fav_list.customContextMenuRequested.connect(self._fav_context_menu)
+        self.preview_check.toggled.connect(self._on_preview_toggle)
+        self.table.selectionModel().currentRowChanged.connect(self._on_selection_changed)
+        self.seek_slider.sliderPressed.connect(self._on_seek_pressed)
+        self.seek_slider.sliderReleased.connect(self._on_seek_released)
+        self.btn_play_pause.clicked.connect(self._on_play_pause_clicked)
+        self.btn_mute.clicked.connect(self._on_mute_clicked)
+        self.vol_slider.valueChanged.connect(self._on_vol_slider_changed)
+        self._mpv_bridge.time_pos_changed.connect(self._on_mpv_time_pos)
+        self._mpv_bridge.duration_changed.connect(self._on_mpv_duration)
+        self._mpv_bridge.pause_changed.connect(self._on_mpv_pause)
+        self._mpv_bridge.mute_changed.connect(self._on_mpv_mute)
+        self._mpv_bridge.volume_changed.connect(self._on_mpv_volume)
 
     # ── Navigation ────────────────────────────────────────────────────────────
 
@@ -480,6 +611,9 @@ class MainWindow(QMainWindow):
 
         try:
             subprocess.Popen(cmd)
+            self._stop_preview()
+            self.seek_slider.setValue(0)
+            self.lbl_pos.setText("0:00")
             start_name = ordered[start_row]["name"]
             self.status_bar.showMessage(
                 f"Launched {player_bin} — {len(ordered)} file(s), starting at: {start_name}"
@@ -490,30 +624,232 @@ class MainWindow(QMainWindow):
                 f"'{player_bin}' was not found. Is it installed and in PATH?",
             )
 
+    # ── Preview player ────────────────────────────────────────────────────────
+
+    def _on_preview_toggle(self, checked: bool):
+        self.preview_panel.setVisible(checked)
+        if not checked:
+            self._stop_preview()
+
+    def _on_selection_changed(self, _current, _previous):
+        if self.preview_check.isChecked():
+            self._preview_timer.start()
+
+    def _do_preview(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        item = self.table.item(row, 0)
+        if item:
+            self._preview_file(item.data(Qt.ItemDataRole.UserRole))
+
+    def _ensure_mpv(self):
+        if self._mpv is not None:
+            return
+        locale.setlocale(locale.LC_NUMERIC, "C")  # guard: Qt may have reset it
+        wid = int(self.preview_container.winId())
+        self._mpv = mpv.MPV(
+            wid=str(wid),
+            vo="x11",
+            mute=True,
+            keep_open="yes",
+            keep_open_pause=False,
+            input_default_bindings=False,
+            input_vo_keyboard=False,
+            osc=False,
+        )
+
+        bridge = self._mpv_bridge
+
+        @self._mpv.property_observer("time-pos")
+        def _on_pos(name, val):
+            if val is not None:
+                bridge.time_pos_changed.emit(float(val))
+
+        @self._mpv.property_observer("duration")
+        def _on_dur(name, val):
+            if val is not None:
+                bridge.duration_changed.emit(float(val))
+
+        @self._mpv.property_observer("pause")
+        def _on_pause(name, val):
+            if val is not None:
+                bridge.pause_changed.emit(bool(val))
+
+        @self._mpv.property_observer("mute")
+        def _on_mute(name, val):
+            if val is not None:
+                bridge.mute_changed.emit(bool(val))
+
+        @self._mpv.property_observer("volume")
+        def _on_vol(name, val):
+            if val is not None:
+                bridge.volume_changed.emit(float(val))
+
+    def _preview_file(self, path: str):
+        try:
+            self._ensure_mpv()
+            self._preview_path = path
+            self._mpv_duration = 0.0
+            self._mpv_pos = 0.0
+            self.seek_slider.setValue(0)
+            self.lbl_pos.setText("0:00")
+            self.lbl_dur.setText("0:00")
+            self.btn_play_pause.setText("⏸")
+            self._mpv.loadfile(path, mode="replace")
+        except Exception as e:
+            self.status_bar.showMessage(f"Preview error: {e}")
+
+    def _stop_preview(self):
+        if self._mpv is not None:
+            try:
+                self._mpv.stop()
+            except Exception:
+                pass
+
+    # ── Seek bar ──────────────────────────────────────────────────────────────
+
+    def _on_mpv_time_pos(self, secs: float):
+        self._mpv_pos = secs
+        if self._seeking or self._mpv_duration <= 0:
+            return
+        val = int(secs / self._mpv_duration * 10000)
+        self.seek_slider.setValue(val)
+        self.lbl_pos.setText(fmt_duration(secs))
+
+    def _on_mpv_duration(self, secs: float):
+        self._mpv_duration = secs
+        self.lbl_dur.setText(fmt_duration(secs))
+
+    def _on_seek_pressed(self):
+        self._seeking = True
+
+    def _on_seek_released(self):
+        self._seeking = False
+        if self._mpv is not None and self._mpv_duration > 0:
+            target = self.seek_slider.value() / 10000 * self._mpv_duration
+            try:
+                self._mpv.seek(target, "absolute")
+            except Exception:
+                pass
+
+    def _on_play_pause_clicked(self):
+        if self._mpv is not None:
+            try:
+                self._mpv.pause = not self._mpv.pause
+            except Exception:
+                pass
+
+    def _on_mute_clicked(self):
+        if self._mpv is not None:
+            try:
+                self._mpv.mute = not self._mpv.mute
+            except Exception:
+                pass
+
+    def _on_mpv_pause(self, paused: bool):
+        self.btn_play_pause.setText("▶" if paused else "⏸")
+
+    def _on_mpv_mute(self, muted: bool):
+        self.btn_mute.setText("🔇" if muted else "🔊")
+
+    def _on_vol_slider_changed(self, value: int):
+        if self._mpv is not None:
+            try:
+                self._mpv.volume = float(value)
+            except Exception:
+                pass
+
+    def _on_mpv_volume(self, value: float):
+        # Block signals to avoid feedback loop back to _on_vol_slider_changed
+        self.vol_slider.blockSignals(True)
+        self.vol_slider.setValue(int(value))
+        self.vol_slider.blockSignals(False)
+
+    def eventFilter(self, obj, event):
+        if (obj is self.preview_container
+                and event.type() == QEvent.Type.MouseButtonDblClick
+                and event.button() == Qt.MouseButton.LeftButton):
+            self._open_preview_in_player()
+            return True
+        return super().eventFilter(obj, event)
+
+    def _open_preview_in_player(self):
+        if not self._preview_path:
+            return
+        player_bin = PLAYERS[self.player_combo.currentText()]
+        pos = self._mpv_pos
+
+        if player_bin == "mpv":
+            cmd = [player_bin, f"--start={pos:.3f}", self._preview_path]
+        elif player_bin in ("vlc", "cvlc"):
+            cmd = [player_bin, f"--start-time={pos:.3f}", self._preview_path]
+        elif player_bin == "mplayer":
+            cmd = [player_bin, "-ss", f"{pos:.3f}", self._preview_path]
+        else:
+            cmd = [player_bin, self._preview_path]
+
+        try:
+            subprocess.Popen(cmd)
+            self._stop_preview()
+            self.seek_slider.setValue(0)
+            self.lbl_pos.setText("0:00")
+            self.status_bar.showMessage(
+                f"Opened in {player_bin} at {fmt_duration(pos)}: {Path(self._preview_path).name}"
+            )
+        except FileNotFoundError:
+            QMessageBox.critical(self, "Player not found",
+                                 f"'{player_bin}' was not found.")
+
     # ── Favorites ─────────────────────────────────────────────────────────────
 
     def _populate_fav_list(self):
+        current_path = None
+        cur = self.fav_list.currentItem()
+        if cur:
+            current_path = cur.data(Qt.ItemDataRole.UserRole)
         self.fav_list.clear()
-        for path in self._favorites:
-            item = QListWidgetItem(Path(path).name or path)
-            item.setData(Qt.ItemDataRole.UserRole, path)
-            item.setToolTip(path)
+        for bm in self._favorites:
+            item = QListWidgetItem(bm["name"])
+            item.setData(Qt.ItemDataRole.UserRole, bm["path"])
+            item.setToolTip(bm["path"])
             self.fav_list.addItem(item)
+            if bm["path"] == current_path:
+                self.fav_list.setCurrentItem(item)
 
     def _add_favorite(self, path: str):
         if not path or not os.path.isdir(path):
             return
-        if path in self._favorites:
+        if any(bm["path"] == path for bm in self._favorites):
             return
-        self._favorites.append(path)
+        self._favorites.append({"path": path, "name": Path(path).name or path})
         _save_config({"favorites": self._favorites})
         self._populate_fav_list()
 
     def _remove_favorite(self, path: str):
-        if path in self._favorites:
-            self._favorites.remove(path)
+        self._favorites = [bm for bm in self._favorites if bm["path"] != path]
+        _save_config({"favorites": self._favorites})
+        self._populate_fav_list()
+
+    def _rename_favorite(self, path: str):
+        bm = next((b for b in self._favorites if b["path"] == path), None)
+        if bm is None:
+            return
+        name, ok = QInputDialog.getText(
+            self, "Rename Bookmark", "Name:", text=bm["name"]
+        )
+        if ok and name.strip():
+            bm["name"] = name.strip()
             _save_config({"favorites": self._favorites})
             self._populate_fav_list()
+
+    def _rename_selected_fav(self):
+        item = self.fav_list.currentItem()
+        if item:
+            self._rename_favorite(item.data(Qt.ItemDataRole.UserRole))
+
+    def _on_fav_selection_changed(self, current, _previous):
+        self.btn_rename_fav.setEnabled(current is not None)
 
     def _on_fav_click(self, item: QListWidgetItem):
         self._navigate(item.data(Qt.ItemDataRole.UserRole))
@@ -522,10 +858,15 @@ class MainWindow(QMainWindow):
         item = self.fav_list.itemAt(pos)
         if not item:
             return
+        path = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
-        remove_act = menu.addAction("Remove from Favorites")
-        if menu.exec(self.fav_list.viewport().mapToGlobal(pos)) == remove_act:
-            self._remove_favorite(item.data(Qt.ItemDataRole.UserRole))
+        rename_act = menu.addAction("Rename")
+        remove_act = menu.addAction("Remove")
+        chosen = menu.exec(self.fav_list.viewport().mapToGlobal(pos))
+        if chosen == rename_act:
+            self._rename_favorite(path)
+        elif chosen == remove_act:
+            self._remove_favorite(path)
 
     def _tree_context_menu(self, pos: QPoint):
         idx = self.tree.indexAt(pos)
@@ -540,14 +881,27 @@ class MainWindow(QMainWindow):
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        self._preview_timer.stop()
         self._stop_worker()
+        if self._mpv is not None:
+            try:
+                self._mpv.terminate()
+            except Exception:
+                pass
+            self._mpv = None
         event.accept()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
+    # mpv wid embedding needs X11 window IDs; force XCB so winId() returns a
+    # real XID even under Wayland (runs via XWayland transparently).
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
     app = QApplication(sys.argv)
+    # QApplication resets LC_NUMERIC via setlocale(LC_ALL,""); restore for mpv.
+    locale.setlocale(locale.LC_NUMERIC, "C")
     app.setStyle("Fusion")
     win = MainWindow()
     win.show()
