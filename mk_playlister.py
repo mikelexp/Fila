@@ -508,6 +508,8 @@ class MainWindow(QMainWindow):
         self._all_files = files
         self._render_table()
         self._maybe_fetch_durations()
+        self.table.clearSelection()
+        self.table.setCurrentIndex(self.table.model().index(-1, -1))
 
     def _on_type_changed(self):
         self._render_table()
