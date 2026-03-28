@@ -14,7 +14,7 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 
 import mpv
 
-from PySide6.QtCore import Qt, QObject, QEvent, QThread, Signal, QModelIndex, QDir, QPoint, QTimer
+from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QTreeView, QComboBox, QLabel, QPushButton,
@@ -78,13 +78,6 @@ FILE_TYPES: dict[str, set[str]] = {
         ".mid", ".midi", ".mod", ".xm", ".it", ".s3m",
     },
     "All": set(),  # empty = no extension filter
-}
-
-PLAYERS: dict[str, str] = {
-    "mpv":             "mpv",
-    "vlc":             "vlc",
-    "mplayer":         "mplayer",
-    "cvlc (headless)": "cvlc",
 }
 
 # Role used to store the raw numeric/string sort key alongside display text
@@ -212,11 +205,12 @@ class SeekSlider(QSlider):
 class _MpvBridge(QObject):
     """Receives mpv property callbacks (called from mpv's thread) and re-emits
     them as Qt signals, which Qt queues onto the main thread automatically."""
-    time_pos_changed  = Signal(float)   # current position in seconds
-    duration_changed  = Signal(float)   # total duration in seconds
-    pause_changed     = Signal(bool)    # True = paused
-    mute_changed      = Signal(bool)    # True = muted
-    volume_changed    = Signal(float)   # 0–100
+    time_pos_changed   = Signal(float)   # current position in seconds
+    duration_changed   = Signal(float)   # total duration in seconds
+    pause_changed      = Signal(bool)    # True = paused
+    mute_changed       = Signal(bool)    # True = muted
+    volume_changed     = Signal(float)   # 0–100
+    preview_dbl_clicked = Signal()       # MOUSE_BTN0_DBL inside the video area
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -236,6 +230,7 @@ class MainWindow(QMainWindow):
         self._mpv_bridge = _MpvBridge()
         self._mpv_duration: float = 0.0
         self._mpv_pos: float = 0.0           # current playback position in preview
+        self._mpv_muted: bool = True         # mirrors mpv mute state (starts muted)
         self._preview_path: str = ""         # file currently loaded in preview
         self._seeking: bool = False          # True while user drags the slider
         self._preview_timer = QTimer(singleShot=True, interval=250)
@@ -282,15 +277,6 @@ class MainWindow(QMainWindow):
         self.preview_check = QCheckBox("Preview")
         self.preview_check.setChecked(True)
         tb.addWidget(self.preview_check)
-
-        tb.addWidget(vline())
-
-        tb.addWidget(QLabel("Player:"))
-        self.player_combo = QComboBox()
-        self.player_combo.addItems(PLAYERS.keys())
-        self.player_combo.setCurrentText("mpv")
-        self.player_combo.setMinimumWidth(130)
-        tb.addWidget(self.player_combo)
 
         tb.addWidget(vline())
 
@@ -391,7 +377,6 @@ class MainWindow(QMainWindow):
         self.preview_container.setMinimumHeight(60)
         self.preview_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
         self.preview_container.setStyleSheet("background: black;")
-        self.preview_container.installEventFilter(self)
         pp_layout.addWidget(self.preview_container, 1)
 
         # Seek bar row
@@ -472,6 +457,7 @@ class MainWindow(QMainWindow):
         self._mpv_bridge.pause_changed.connect(self._on_mpv_pause)
         self._mpv_bridge.mute_changed.connect(self._on_mpv_mute)
         self._mpv_bridge.volume_changed.connect(self._on_mpv_volume)
+        self._mpv_bridge.preview_dbl_clicked.connect(self._open_preview_in_player)
 
     # ── Navigation ────────────────────────────────────────────────────────────
 
@@ -641,24 +627,7 @@ class MainWindow(QMainWindow):
                 fh.write(f"#EXTINF:{dur},{f['name']}\n")
                 fh.write(f"{f['path']}\n")
 
-        player_label = self.player_combo.currentText()
-        player_bin   = PLAYERS[player_label]
-
-        # Build the launch command depending on player capabilities
-        if player_bin == "mpv":
-            cmd = [player_bin, f"--playlist-start={start_row}", playlist]
-        elif player_bin in ("vlc", "cvlc"):
-            # VLC has no playlist-start flag for m3u files; reorder instead
-            rotated = ordered[start_row:] + ordered[:start_row]
-            with open(playlist, "w", encoding="utf-8") as fh:
-                fh.write("#EXTM3U\n")
-                for f in rotated:
-                    dur = int(f["duration"]) if f["duration"] > 0 else -1
-                    fh.write(f"#EXTINF:{dur},{f['name']}\n")
-                    fh.write(f"{f['path']}\n")
-            cmd = [player_bin, playlist]
-        else:
-            cmd = [player_bin, playlist]
+        cmd = ["mpv", f"--playlist-start={start_row}", playlist]
 
         try:
             subprocess.Popen(cmd)
@@ -667,12 +636,12 @@ class MainWindow(QMainWindow):
             self.lbl_pos.setText("0:00")
             start_name = ordered[start_row]["name"]
             self.status_bar.showMessage(
-                f"Launched {player_bin} — {len(ordered)} file(s), starting at: {start_name}"
+                f"Launched mpv — {len(ordered)} file(s), starting at: {start_name}"
             )
         except FileNotFoundError:
             QMessageBox.critical(
                 self, "Player not found",
-                f"'{player_bin}' was not found. Is it installed and in PATH?",
+                "mpv was not found. Is it installed and in PATH?",
             )
 
     # ── Preview player ────────────────────────────────────────────────────────
@@ -711,6 +680,11 @@ class MainWindow(QMainWindow):
         )
 
         bridge = self._mpv_bridge
+
+        # Double-click in the video area → open in external player.
+        # mpv owns the X11 mouse events, so we hook into its input system directly.
+        self._mpv.register_key_binding('MOUSE_BTN0_DBL',
+                                       lambda *_: bridge.preview_dbl_clicked.emit())
 
         @self._mpv.property_observer("time-pos")
         def _on_pos(name, val):
@@ -802,6 +776,7 @@ class MainWindow(QMainWindow):
         self.btn_play_pause.setText("▶" if paused else "⏸")
 
     def _on_mpv_mute(self, muted: bool):
+        self._mpv_muted = muted
         self.btn_mute.setText("🔇" if muted else "🔊")
 
     def _on_vol_slider_changed(self, value: int):
@@ -817,28 +792,14 @@ class MainWindow(QMainWindow):
         self.vol_slider.setValue(int(value))
         self.vol_slider.blockSignals(False)
 
-    def eventFilter(self, obj, event):
-        if (obj is self.preview_container
-                and event.type() == QEvent.Type.MouseButtonDblClick
-                and event.button() == Qt.MouseButton.LeftButton):
-            self._open_preview_in_player()
-            return True
-        return super().eventFilter(obj, event)
-
     def _open_preview_in_player(self):
         if not self._preview_path:
             return
-        player_bin = PLAYERS[self.player_combo.currentText()]
         pos = self._mpv_pos
-
-        if player_bin == "mpv":
-            cmd = [player_bin, f"--start={pos:.3f}", self._preview_path]
-        elif player_bin in ("vlc", "cvlc"):
-            cmd = [player_bin, f"--start-time={pos:.3f}", self._preview_path]
-        elif player_bin == "mplayer":
-            cmd = [player_bin, "-ss", f"{pos:.3f}", self._preview_path]
-        else:
-            cmd = [player_bin, self._preview_path]
+        cmd = ["mpv", f"--start={pos:.3f}"]
+        if self._mpv_muted:
+            cmd.append("--mute=yes")
+        cmd.append(self._preview_path)
 
         try:
             subprocess.Popen(cmd)
@@ -846,11 +807,11 @@ class MainWindow(QMainWindow):
             self.seek_slider.setValue(0)
             self.lbl_pos.setText("0:00")
             self.status_bar.showMessage(
-                f"Opened in {player_bin} at {fmt_duration(pos)}: {Path(self._preview_path).name}"
+                f"Opened in mpv at {fmt_duration(pos)}: {Path(self._preview_path).name}"
             )
         except FileNotFoundError:
             QMessageBox.critical(self, "Player not found",
-                                 f"'{player_bin}' was not found.")
+                                 "mpv was not found. Is it installed and in PATH?")
 
     # ── Favorites ─────────────────────────────────────────────────────────────
 
