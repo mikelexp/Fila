@@ -23,9 +23,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 System dependencies required: `mpv`, `libmpv` (for embedded preview), `ffmpeg`/`ffprobe` (for duration fetching), `patchelf` (for Nuitka build).
 
+Python dependencies: `PySide6`, `python-mpv`, `send2trash` (see `requirements.txt`).
+
 ## Architecture
 
 The entire application lives in a single file: `fila.py`.
+
+### Layout
+
+Three-pane layout managed by two nested `QSplitter`s:
+- **Horizontal splitter**: left panel | right panel
+- **Left panel** contains a vertical `QSplitter`: favorites list (top) | folder tree (bottom) — both sections are user-resizable
+- **Right panel** contains a vertical `QSplitter`: file table (top) | preview panel (bottom)
 
 ### Threading model
 
@@ -44,8 +53,21 @@ mpv is embedded via X11 window ID (`wid`). Critical constraints:
 
 ### Config persistence
 
-Config is stored at `~/.config/fila/fila.json`. Use `_update_config(**kwargs)` to merge changes without clobbering other keys. Favorites are stored as `[{"path": str, "name": str}]`.
+Config is stored at `~/.config/fila/fila.json`. Use `_update_config(**kwargs)` to merge changes without clobbering other keys. Favorites are stored as `[{"path": str, "name": str}]` and persist drag-and-drop reorder order.
 
 ### Table sorting
 
 `NumericItem(QTableWidgetItem)` stores a raw numeric sort key in `SORT_ROLE` and overrides `__lt__` to use it. `setSortingEnabled(False)` is used during table population and during duration cell updates to avoid O(n²) re-sorts.
+
+### File operations
+
+Right-click context menu on the file table provides:
+- **Show in File Manager**: uses `org.freedesktop.FileManager1` D-Bus to highlight the file in the running file manager (Nautilus, Dolphin, Thunar, Nemo); falls back to `xdg-open` on the parent folder
+- **Move to Trash**: uses `send2trash`
+- **Delete Permanently**: prompts for confirmation, then `os.remove()`
+
+All three operations remove the file from `_all_files` and the table without triggering a full folder rescan (`_remove_file_from_view`).
+
+### Icon
+
+`icon.png` lives in the project root and is embedded into the Nuitka onefile binary via `--include-data-files=icon.png=icon.png`. At runtime, `Path(__file__).parent / "icon.png"` resolves correctly both in dev mode and from the Nuitka extraction cache (`~/.cache/fila/`).
