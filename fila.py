@@ -12,6 +12,7 @@ from pathlib import Path
 
 locale.setlocale(locale.LC_NUMERIC, "C")
 
+import send2trash
 import mpv
 
 from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer
@@ -374,6 +375,7 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         # ── Preview panel (video area + seek bar) ────────────────────────────
         self.preview_panel = QWidget()
@@ -449,6 +451,7 @@ class MainWindow(QMainWindow):
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
         self.play_btn.clicked.connect(self._play)
         self.table.cellDoubleClicked.connect(self._on_double_click)
+        self.table.customContextMenuRequested.connect(self._table_context_menu)
         self.btn_add_fav.clicked.connect(lambda: self._add_favorite(self._current_folder))
         self.btn_rename_fav.clicked.connect(self._rename_selected_fav)
         self.fav_list.itemClicked.connect(self._on_fav_click)
@@ -621,6 +624,76 @@ class MainWindow(QMainWindow):
 
     def _on_double_click(self, row: int, _col: int):
         self._play(start_row=row)
+
+    def _table_context_menu(self, pos: QPoint):
+        item = self.table.itemAt(pos)
+        if not item:
+            return
+        row = self.table.rowAt(pos.y())
+        path = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if not path:
+            return
+        menu = QMenu(self)
+        open_act = menu.addAction("Show in File Manager")
+        menu.addSeparator()
+        trash_act = menu.addAction("Move to Trash")
+        delete_act = menu.addAction("Delete Permanently")
+        chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if chosen == open_act:
+            self._show_in_file_manager(path)
+        elif chosen == trash_act:
+            self._trash_file(path)
+        elif chosen == delete_act:
+            self._delete_file(path)
+
+    def _show_in_file_manager(self, path: str):
+        uri = Path(path).as_uri()
+        try:
+            subprocess.Popen([
+                "dbus-send", "--session",
+                "--dest=org.freedesktop.FileManager1",
+                "--type=method_call",
+                "/org/freedesktop/FileManager1",
+                "org.freedesktop.FileManager1.ShowItems",
+                f"array:string:{uri}", "string:",
+            ])
+        except FileNotFoundError:
+            subprocess.Popen(["xdg-open", str(Path(path).parent)])
+
+    def _trash_file(self, path: str):
+        try:
+            send2trash.send2trash(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not move to trash:\n{e}")
+            return
+        self._remove_file_from_view(path)
+
+    def _delete_file(self, path: str):
+        name = Path(path).name
+        reply = QMessageBox.question(
+            self, "Delete Permanently",
+            f"Permanently delete '{name}'?\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            os.remove(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not delete file:\n{e}")
+            return
+        self._remove_file_from_view(path)
+
+    def _remove_file_from_view(self, path: str):
+        self._all_files = [f for f in self._all_files if f["path"] != path]
+        self._dur_cache.pop(path, None)
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 0).data(Qt.ItemDataRole.UserRole) == path:
+                self.table.removeRow(row)
+                break
+        self.status_bar.showMessage(
+            f"{self.table.rowCount()} file(s)  •  {self._current_folder}"
+        )
 
     def _play(self, start_row: int = 0):
         ordered = self._table_ordered_files()
