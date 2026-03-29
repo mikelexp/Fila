@@ -303,9 +303,16 @@ class MainWindow(QMainWindow):
         left.setMinimumWidth(200)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(2)
+        left_layout.setSpacing(0)
 
-        # Favorites header row
+        left_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Favorites section
+        fav_widget = QWidget()
+        fav_widget_layout = QVBoxLayout(fav_widget)
+        fav_widget_layout.setContentsMargins(0, 0, 0, 0)
+        fav_widget_layout.setSpacing(2)
+
         fav_header = QHBoxLayout()
         fav_lbl = QLabel("Favorites")
         fav_lbl_font = fav_lbl.font()
@@ -324,17 +331,15 @@ class MainWindow(QMainWindow):
         self.btn_rename_fav.setEnabled(False)
         fav_header.addWidget(self.btn_rename_fav)
 
-        left_layout.addLayout(fav_header)
+        fav_widget_layout.addLayout(fav_header)
 
         self.fav_list = QListWidget()
-        self.fav_list.setMaximumHeight(160)
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        left_layout.addWidget(self.fav_list)
+        self.fav_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.fav_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        fav_widget_layout.addWidget(self.fav_list)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        left_layout.addWidget(sep)
+        left_splitter.addWidget(fav_widget)
 
         # Folder tree
         self.fs_model = QFileSystemModel()
@@ -347,7 +352,10 @@ class MainWindow(QMainWindow):
         for col in range(1, self.fs_model.columnCount()):
             self.tree.hideColumn(col)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        left_layout.addWidget(self.tree, 1)
+        left_splitter.addWidget(self.tree)
+
+        left_splitter.setSizes([160, 400])
+        left_layout.addWidget(left_splitter)
 
         splitter.addWidget(left)
 
@@ -446,6 +454,7 @@ class MainWindow(QMainWindow):
         self.fav_list.itemClicked.connect(self._on_fav_click)
         self.fav_list.currentItemChanged.connect(self._on_fav_selection_changed)
         self.fav_list.customContextMenuRequested.connect(self._fav_context_menu)
+        self.fav_list.model().rowsMoved.connect(self._on_fav_reordered)
         self.preview_check.toggled.connect(self._on_preview_toggle)
         self.table.selectionModel().currentRowChanged.connect(self._on_selection_changed)
         self.seek_slider.sliderPressed.connect(self._on_seek_pressed)
@@ -862,6 +871,14 @@ class MainWindow(QMainWindow):
         item = self.fav_list.currentItem()
         if item:
             self._rename_favorite(item.data(Qt.ItemDataRole.UserRole))
+
+    def _on_fav_reordered(self):
+        self._favorites = [
+            {"path": self.fav_list.item(i).data(Qt.ItemDataRole.UserRole),
+             "name": self.fav_list.item(i).text()}
+            for i in range(self.fav_list.count())
+        ]
+        _update_config(favorites=self._favorites)
 
     def _on_fav_selection_changed(self, current, _previous):
         self.btn_rename_fav.setEnabled(current is not None)
