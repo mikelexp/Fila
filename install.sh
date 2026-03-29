@@ -1,12 +1,12 @@
 #!/bin/bash
-# Script de instalación para MKVideoPlaylister
+# Script de instalación para Fila
 
 set -e
 
-echo "=== Instalando MKVideoPlaylister ==="
+echo "=== Instalando Fila ==="
 
 # Verificar que el binario compilado exista
-if [ ! -f "dist/mkplaylister" ]; then
+if [ ! -f "dist/fila" ]; then
     echo "Error: El binario compilado no existe"
     echo "Por favor ejecuta primero: ./build.sh"
     exit 1
@@ -16,18 +16,18 @@ BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 
 # Copiar el binario único
-echo "Copiando binario a $BIN_DIR/mkplaylister..."
-cp dist/mkplaylister "$BIN_DIR/mkplaylister"
-chmod +x "$BIN_DIR/mkplaylister"
+echo "Copiando binario a $BIN_DIR/fila..."
+cp dist/fila "$BIN_DIR/fila"
+chmod +x "$BIN_DIR/fila"
 
 # Instalar el icono si existe
 ICON_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
 mkdir -p "$ICON_DIR"
 
-if [ -f "mkplaylister-icon.png" ]; then
+if [ -f "icon.png" ]; then
     echo "Instalando icono..."
-    cp mkplaylister-icon.png "$ICON_DIR/mkplaylister.png"
-    ICON_NAME="mkplaylister"
+    cp icon.png "$ICON_DIR/fila.png"
+    ICON_NAME="fila"
 else
     ICON_NAME="multimedia-video-player"
 fi
@@ -37,19 +37,19 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 mkdir -p "$DESKTOP_DIR"
 
 echo "Creando archivo .desktop..."
-cat > "$DESKTOP_DIR/mkplaylister.desktop" << EOF
+cat > "$DESKTOP_DIR/fila.desktop" << EOF
 [Desktop Entry]
 Type=Application
-Name=MK Video Playlister
+Name=Fila
 Comment=Explorador de archivos multimedia con listas de reproducción
-Exec=$BIN_DIR/mkplaylister
+Exec=$BIN_DIR/fila
 Icon=$ICON_NAME
 Terminal=false
 Categories=AudioVideo;Video;Player;
 Keywords=video;audio;playlist;mpv;media;
 EOF
 
-echo "Archivo .desktop instalado en: $DESKTOP_DIR/mkplaylister.desktop"
+echo "Archivo .desktop instalado en: $DESKTOP_DIR/fila.desktop"
 
 # Actualizar la base de datos de aplicaciones
 if command -v update-desktop-database &> /dev/null; then
@@ -74,13 +74,13 @@ fi
 echo ""
 echo "=== Instalación completada ==="
 echo ""
-echo "Ejecutable instalado en: $BIN_DIR/mkplaylister"
-echo "Caché de extracción en:  ~/.cache/mkplaylister/"
+echo "Ejecutable instalado en: $BIN_DIR/fila"
+echo "Caché de extracción en:  ~/.cache/fila/"
 echo ""
 echo "Para ejecutar:"
-echo "  mkplaylister"
+echo "  fila"
 echo ""
 echo "Para desinstalar:"
-echo "  rm $BIN_DIR/mkplaylister"
-echo "  rm -rf ~/.cache/mkplaylister"
-echo "  rm $DESKTOP_DIR/mkplaylister.desktop"
+echo "  rm $BIN_DIR/fila"
+echo "  rm -rf ~/.cache/fila"
+echo "  rm $DESKTOP_DIR/fila.desktop"

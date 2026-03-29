@@ -1,10 +1,10 @@
 #!/bin/bash
-# Script para ejecutar MKVideoPlaylister sin compilar (desarrollo)
+# Script para ejecutar Fila sin compilar (desarrollo)
 
 set -e
 
 # Verificar que estemos en el directorio correcto
-if [ ! -f "mk_playlister.py" ]; then
+if [ ! -f "fila.py" ]; then
     echo "Error: Ejecuta este script desde el directorio del proyecto"
     exit 1
 fi
@@ -37,4 +37,4 @@ if ! ./venv/bin/python -c "import PySide6; import mpv" 2>/dev/null; then
 fi
 
 # Ejecutar la aplicación
-exec ./venv/bin/python mk_playlister.py "$@"
+exec ./venv/bin/python fila.py "$@"

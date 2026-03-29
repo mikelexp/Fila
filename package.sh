@@ -1,22 +1,22 @@
 #!/bin/bash
-# Script para crear paquete de distribución de MKVideoPlaylister
+# Script para crear paquete de distribución de Fila
 
 set -e
 
-echo "=== Empaquetando MKVideoPlaylister para distribución ==="
+echo "=== Empaquetando Fila para distribución ==="
 
 if [ ! -f "install.sh" ]; then
     echo "Error: Ejecuta este script desde el directorio del proyecto"
     exit 1
 fi
 
-if [ ! -f "dist/mkplaylister" ]; then
+if [ ! -f "dist/fila" ]; then
     echo "Error: El binario no existe"
     echo "Por favor ejecuta primero: ./build.sh"
     exit 1
 fi
 
-PACKAGE_NAME="mkplaylister-$(date +%Y%m%d-%H%M%S)"
+PACKAGE_NAME="fila-$(date +%Y%m%d-%H%M%S)"
 TEMP_DIR="/tmp/$PACKAGE_NAME"
 
 echo "Creando directorio temporal: $TEMP_DIR"
@@ -24,20 +24,20 @@ rm -rf "$TEMP_DIR"
 mkdir -p "$TEMP_DIR"
 
 echo "Copiando binario..."
-cp dist/mkplaylister "$TEMP_DIR/"
-chmod +x "$TEMP_DIR/mkplaylister"
+cp dist/fila "$TEMP_DIR/"
+chmod +x "$TEMP_DIR/fila"
 
 echo "Copiando script de instalación..."
 cp install.sh "$TEMP_DIR/"
 chmod +x "$TEMP_DIR/install.sh"
 
-if [ -f "mkplaylister-icon.png" ]; then
+if [ -f "icon.png" ]; then
     echo "Copiando icono..."
-    cp mkplaylister-icon.png "$TEMP_DIR/"
+    cp icon.png "$TEMP_DIR/"
 fi
 
 cat > "$TEMP_DIR/README.txt" << 'EOF'
-# MK Video Playlister
+# Fila
 
 Explorador de archivos multimedia con preview integrado y listas de reproducción m3u8.
 Binario único autocontenido — no requiere Python ni dependencias adicionales.
@@ -49,15 +49,15 @@ Binario único autocontenido — no requiere Python ni dependencias adicionales.
 
 ## Instalación
 
-  tar -xzf mkplaylister-*.tar.gz
-  cd mkplaylister-*/
+  tar -xzf fila-*.tar.gz
+  cd fila-*/
   ./install.sh
 
 ## Desinstalación
 
-  rm ~/.local/bin/mkplaylister
-  rm -rf ~/.cache/mkplaylister
-  rm ~/.local/share/applications/mkplaylister.desktop
+  rm ~/.local/bin/fila
+  rm -rf ~/.cache/fila
+  rm ~/.local/share/applications/fila.desktop
 EOF
 
 ORIGINAL_DIR="$(pwd)"

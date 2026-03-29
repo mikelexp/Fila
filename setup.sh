@@ -1,12 +1,12 @@
 #!/bin/bash
-# Script de configuración inicial para MKVideoPlaylister
+# Script de configuración inicial para Fila
 
 set -e
 
-echo "=== Configurando MKVideoPlaylister ==="
+echo "=== Configurando Fila ==="
 
 # Verificar que estemos en el directorio correcto
-if [ ! -f "mk_playlister.py" ]; then
+if [ ! -f "fila.py" ]; then
     echo "Error: Ejecuta este script desde el directorio del proyecto"
     exit 1
 fi

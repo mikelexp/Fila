@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MKVideoPlaylister — browse folders, filter by type, sort, generate .m3u8, play."""
+"""Fila — browse folders, filter by type, sort, generate .m3u8, play."""
 
 import locale
 import os
@@ -15,6 +15,7 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 import mpv
 
 from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QTreeView, QComboBox, QLabel, QPushButton,
@@ -85,7 +86,7 @@ SORT_ROLE = Qt.ItemDataRole.UserRole + 1
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-CONFIG_PATH = Path.home() / ".config" / "mkplaylister" / "mkplaylister.json"
+CONFIG_PATH = Path.home() / ".config" / "fila" / "fila.json"
 
 
 def _load_config() -> dict:
@@ -218,7 +219,7 @@ class _MpvBridge(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MK Video Playlister")
+        self.setWindowTitle("Fila")
         self.resize(1100, 680)
 
         self._all_files: list[dict] = []
@@ -621,7 +622,7 @@ class MainWindow(QMainWindow):
         # Clamp start index
         start_row = max(0, min(start_row, len(ordered) - 1))
 
-        playlist = os.path.join(tempfile.gettempdir(), "mk_playlister.m3u8")
+        playlist = os.path.join(tempfile.gettempdir(), "fila.m3u8")
         with open(playlist, "w", encoding="utf-8") as fh:
             fh.write("#EXTM3U\n")
             for f in ordered:
@@ -918,6 +919,9 @@ def main():
     # QApplication resets LC_NUMERIC via setlocale(LC_ALL,""); restore for mpv.
     locale.setlocale(locale.LC_NUMERIC, "C")
     app.setStyle("Fusion")
+    _icon = Path(__file__).parent / "icon.png"
+    if _icon.exists():
+        app.setWindowIcon(QIcon(str(_icon)))
     win = MainWindow()
     if _load_config().get("maximized", False):
         win.showMaximized()

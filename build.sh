@@ -1,14 +1,14 @@
 #!/bin/bash
-# Script de compilación con Nuitka para MKVideoPlaylister
+# Script de compilación con Nuitka para Fila
 # Genera un único binario autocontenido. Dependencias del sistema requeridas
 # en la máquina destino: libmpv.so (mpv), libmpv.so (preview), ffprobe (duraciones).
 
 set -e
 
-echo "=== Compilando MKVideoPlaylister con Nuitka (onefile) ==="
+echo "=== Compilando Fila con Nuitka (onefile) ==="
 
 # Verificar que estemos en el directorio correcto
-if [ ! -f "mk_playlister.py" ]; then
+if [ ! -f "fila.py" ]; then
     echo "Error: Ejecuta este script desde el directorio del proyecto"
     exit 1
 fi
@@ -45,14 +45,14 @@ echo "Esto puede tomar varios minutos..."
 echo ""
 
 # Limpiar compilaciones anteriores
-rm -rf dist/mkplaylister mkplaylister.build mkplaylister.onefile-build
+rm -rf dist/fila fila.build fila.onefile-build
 
 mkdir -p dist
 
 # Compilar con Nuitka en modo onefile.
 #
-# --onefile-tempdir-spec="{CACHE_DIR}/mkplaylister"
-#   Extrae a ~/.cache/mkplaylister/ la primera vez y reutiliza el caché
+# --onefile-tempdir-spec="{CACHE_DIR}/fila"
+#   Extrae a ~/.cache/fila/ la primera vez y reutiliza el caché
 #   en ejecuciones posteriores (no re-extrae si el binario no cambió).
 #   Esto evita la penalización de extracción en cada arranque.
 #
@@ -63,17 +63,18 @@ mkdir -p dist
 #   - mpv/vlc/mplayer → reproductores externos
 python -m nuitka \
     --onefile \
-    --onefile-tempdir-spec="{CACHE_DIR}/mkplaylister" \
+    --onefile-tempdir-spec="{CACHE_DIR}/fila" \
     --enable-plugin=pyside6 \
-    --output-filename=mkplaylister \
+    --include-data-files=icon.png=icon.png \
+    --output-filename=fila \
     --output-dir=dist \
     --assume-yes-for-downloads \
-    mk_playlister.py
+    fila.py
 
 echo ""
 echo "=== Compilación completada ==="
 echo ""
-echo "Binario único creado en: ./dist/mkplaylister"
+echo "Binario único creado en: ./dist/fila"
 echo ""
 echo "Dependencias requeridas en el sistema destino:"
 echo "  - libmpv.so.2  (paquete mpv)"
@@ -81,7 +82,7 @@ echo "  - ffprobe      (paquete ffmpeg, para duración de videos)"
 echo "  - mpv/vlc      (reproductores para la función Play)"
 echo ""
 echo "Para probarlo:"
-echo "  ./dist/mkplaylister"
+echo "  ./dist/fila"
 echo ""
 echo "Para instalar en el sistema:"
 echo "  ./install.sh"
