@@ -15,14 +15,15 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 import send2trash
 import mpv
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer
+from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QTreeView, QComboBox, QLabel, QPushButton,
+    QToolButton,
     QFileSystemModel, QHeaderView, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QStatusBar, QLineEdit, QFrame, QMessageBox,
-    QListWidget, QListWidgetItem, QMenu, QCheckBox, QSlider, QStyle,
+    QListWidget, QListWidgetItem, QMenu, QCheckBox, QSlider, QStyle, QStyleOptionSlider,
     QInputDialog,
 )
 
@@ -186,6 +187,8 @@ def vline() -> QFrame:
     ln = QFrame()
     ln.setFrameShape(QFrame.Shape.VLine)
     ln.setFrameShadow(QFrame.Shadow.Sunken)
+    ln.setLineWidth(1)
+    ln.setMidLineWidth(0)
     return ln
 
 
@@ -194,11 +197,31 @@ def vline() -> QFrame:
 class SeekSlider(QSlider):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            opt = QStyleOptionSlider()
+            self.initStyleOption(opt)
+            if self.style().hitTestComplexControl(
+                QStyle.ComplexControl.CC_Slider,
+                opt,
+                event.position().toPoint(),
+                self,
+            ) == QStyle.SubControl.SC_SliderHandle:
+                super().mousePressEvent(event)
+                return
+
+            groove = self.style().subControlRect(
+                QStyle.ComplexControl.CC_Slider,
+                opt,
+                QStyle.SubControl.SC_SliderGroove,
+                self,
+            )
+            x = event.position().toPoint().x() - groove.x()
             val = QStyle.sliderValueFromPosition(
-                self.minimum(), self.maximum(),
-                event.position().toPoint().x(), self.width(),
+                self.minimum(), self.maximum(), x, max(1, groove.width())
             )
             self.setValue(val)
+            event.accept()
+            return
+
         super().mousePressEvent(event)
 
 
@@ -243,26 +266,212 @@ class MainWindow(QMainWindow):
         self._populate_fav_list()
         self._navigate(str(Path.home()))
 
+    def _set_play_pause_icon(self, paused: bool) -> None:
+        icon = self.style().standardIcon(
+            QStyle.StandardPixmap.SP_MediaPlay if paused else QStyle.StandardPixmap.SP_MediaPause
+        )
+        self.btn_play_pause.setIcon(icon)
+
+    def _set_mute_icon(self, muted: bool) -> None:
+        icon = self.style().standardIcon(
+            QStyle.StandardPixmap.SP_MediaVolumeMuted if muted else QStyle.StandardPixmap.SP_MediaVolume
+        )
+        self.btn_mute.setIcon(icon)
+
     # ── Build UI ──────────────────────────────────────────────────────────────
 
     def _build_ui(self):
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(6, 6, 6, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        self.setStyleSheet(
+            """
+            QWidget#topBar,
+            QWidget#leftPane,
+            QWidget#previewPane,
+            QTreeView#folderTree,
+            QListWidget#favoritesList,
+            QTableWidget#fileTable {
+                background: palette(window);
+                border: 1px solid palette(mid);
+                border-radius: 7px;
+            }
+
+            QWidget#topBar {
+                padding: 6px;
+            }
+
+            QTableWidget#fileTable,
+            QTreeView#folderTree,
+            QListWidget#favoritesList {
+                background-color: palette(base);
+            }
+
+            QWidget#topBar QLineEdit,
+            QWidget#topBar QComboBox {
+                background: palette(base);
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                padding: 4px 8px;
+                min-height: 22px;
+            }
+
+            QWidget#topBar QComboBox::drop-down {
+                border: 0;
+                width: 22px;
+            }
+
+            QWidget#topBar QComboBox QAbstractItemView {
+                background: palette(base);
+                selection-background-color: palette(highlight);
+                selection-color: palette(highlighted-text);
+                border: 1px solid palette(mid);
+            }
+
+            QWidget#topBar QPushButton {
+                background: palette(button);
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                padding: 0 10px;
+                min-height: 26px;
+            }
+
+            QWidget#topBar QPushButton:hover {
+                background: palette(light);
+            }
+
+            QWidget#topBar QPushButton:pressed {
+                background: palette(mid);
+            }
+
+            QWidget#topBar QCheckBox {
+                spacing: 6px;
+            }
+
+            QWidget#topBar QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+            }
+
+            QPushButton#playButton,
+            QToolButton#previewControlButton {
+                background: palette(button);
+                border: 1px solid palette(mid);
+                border-radius: 7px;
+                padding: 0 8px;
+            }
+
+            QPushButton#playButton:hover,
+            QToolButton#previewControlButton:hover {
+                background: palette(light);
+            }
+
+            QPushButton#playButton:pressed,
+            QToolButton#previewControlButton:pressed {
+                background: palette(mid);
+            }
+
+            QPushButton#playButton {
+                font-weight: 600;
+            }
+
+            QSlider#seekSlider::groove:horizontal {
+                height: 6px;
+                border-radius: 3px;
+                background: palette(button);
+                border: 1px solid palette(mid);
+                margin: 0 4px;
+            }
+
+            QSlider#seekSlider::sub-page:horizontal {
+                border-radius: 3px;
+                background: palette(highlight);
+            }
+
+            QSlider#seekSlider::add-page:horizontal {
+                border-radius: 3px;
+                background: palette(light);
+            }
+
+            QSlider#seekSlider::handle:horizontal {
+                width: 16px;
+                margin: -6px 0;
+                border-radius: 8px;
+                background: palette(highlight);
+                border: 2px solid palette(window);
+            }
+
+            QSlider#seekSlider::handle:horizontal:hover {
+                background: palette(midlight);
+            }
+
+            QSlider#volumeSlider::groove:horizontal {
+                height: 4px;
+                border-radius: 2px;
+                background: palette(button);
+                border: 1px solid palette(mid);
+            }
+
+            QSlider#volumeSlider::sub-page:horizontal {
+                border-radius: 2px;
+                background: palette(highlight);
+            }
+
+            QSlider#volumeSlider::add-page:horizontal {
+                border-radius: 2px;
+                background: palette(light);
+            }
+
+            QSlider#volumeSlider::handle:horizontal {
+                width: 12px;
+                margin: -5px 0;
+                border-radius: 6px;
+                background: palette(button);
+                border: 1px solid palette(mid);
+            }
+
+            QSplitter::handle:horizontal {
+                background: palette(button);
+                border: 1px solid palette(mid);
+                margin: 2px 0;
+                min-height: 8px;
+                border-radius: 4px;
+            }
+
+            QSplitter::handle:vertical {
+                background: palette(button);
+                border: 1px solid palette(mid);
+                margin: 0 2px;
+                min-width: 8px;
+                border-radius: 4px;
+            }
+
+            QSplitter::handle:hover {
+                background: palette(midlight);
+            }
+            """
+        )
 
         # Toolbar
-        tb = QHBoxLayout()
+        top_bar = QWidget()
+        top_bar.setObjectName("topBar")
+        tb = QHBoxLayout(top_bar)
+        tb.setContentsMargins(6, 6, 6, 6)
         tb.setSpacing(6)
 
         tb.addWidget(QLabel("Path:"))
         self.path_edit = QLineEdit()
+        self.path_edit.setMinimumHeight(30)
         self.path_edit.setPlaceholderText("Folder path…")
         tb.addWidget(self.path_edit, 1)
 
         self.btn_go = QPushButton("Go")
+        self.btn_go.setObjectName("topActionButton")
         self.btn_go.setFixedWidth(40)
+        self.btn_go.setFixedHeight(30)
         tb.addWidget(self.btn_go)
 
         tb.addWidget(vline())
@@ -272,12 +481,14 @@ class MainWindow(QMainWindow):
         self.type_combo.addItems(FILE_TYPES.keys())
         self.type_combo.setCurrentText("Videos")
         self.type_combo.setMinimumWidth(90)
+        self.type_combo.setMinimumHeight(30)
         tb.addWidget(self.type_combo)
 
         tb.addWidget(vline())
 
         tb.addWidget(QLabel("Filter:"))
         self.filter_edit = QLineEdit()
+        self.filter_edit.setMinimumHeight(30)
         self.filter_edit.setPlaceholderText("Search files…")
         self.filter_edit.setFixedWidth(160)
         self.filter_edit.setClearButtonEnabled(True)
@@ -287,41 +498,42 @@ class MainWindow(QMainWindow):
 
         self.preview_check = QCheckBox("Preview")
         self.preview_check.setChecked(True)
+        self.preview_check.setMinimumHeight(30)
         tb.addWidget(self.preview_check)
 
         tb.addWidget(vline())
 
-        self.play_btn = QPushButton("▶  Play")
+        self.play_btn = QPushButton("Play")
+        self.play_btn.setObjectName("playButton")
         self.play_btn.setFixedHeight(30)
+        self.play_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.play_btn.setIconSize(QSize(16, 16))
         f = self.play_btn.font()
-        f.setBold(True)
         self.play_btn.setFont(f)
-        self.play_btn.setStyleSheet(
-            "QPushButton{background:#2d7d46;color:white;border-radius:4px;padding:0 14px}"
-            "QPushButton:hover{background:#3a9e5a}"
-            "QPushButton:pressed{background:#1f5c32}"
-        )
         tb.addWidget(self.play_btn)
 
-        layout.addLayout(tb)
+        layout.addWidget(top_bar)
 
         # Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(8)
 
         # ── Left panel: favorites + folder tree ──────────────────────────────
         left = QWidget()
+        left.setObjectName("leftPane")
         left.setMinimumWidth(200)
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
+        left_layout.setContentsMargins(6, 6, 6, 6)
+        left_layout.setSpacing(6)
 
         left_splitter = QSplitter(Qt.Orientation.Vertical)
+        left_splitter.setHandleWidth(8)
 
         # Favorites section
         fav_widget = QWidget()
         fav_widget_layout = QVBoxLayout(fav_widget)
-        fav_widget_layout.setContentsMargins(0, 0, 0, 0)
-        fav_widget_layout.setSpacing(2)
+        fav_widget_layout.setContentsMargins(4, 4, 4, 4)
+        fav_widget_layout.setSpacing(4)
 
         fav_header = QHBoxLayout()
         fav_lbl = QLabel("Favorites")
@@ -344,6 +556,7 @@ class MainWindow(QMainWindow):
         fav_widget_layout.addLayout(fav_header)
 
         self.fav_list = QListWidget()
+        self.fav_list.setObjectName("favoritesList")
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.fav_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.fav_list.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -357,6 +570,7 @@ class MainWindow(QMainWindow):
         self.fs_model.setRootPath("")
 
         self.tree = QTreeView()
+        self.tree.setObjectName("folderTree")
         self.tree.setModel(self.fs_model)
         self.tree.setHeaderHidden(True)
         for col in range(1, self.fs_model.columnCount()):
@@ -370,6 +584,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left)
 
         self.table = QTableWidget()
+        self.table.setObjectName("fileTable")
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Name", "Size", "Duration", "Date Created"])
         hh = self.table.horizontalHeader()
@@ -388,9 +603,10 @@ class MainWindow(QMainWindow):
 
         # ── Preview panel (video area + seek bar) ────────────────────────────
         self.preview_panel = QWidget()
+        self.preview_panel.setObjectName("previewPane")
         pp_layout = QVBoxLayout(self.preview_panel)
-        pp_layout.setContentsMargins(0, 0, 0, 0)
-        pp_layout.setSpacing(2)
+        pp_layout.setContentsMargins(6, 6, 6, 6)
+        pp_layout.setSpacing(8)
 
         # Video area — mpv embeds here via XID
         self.preview_container = QWidget()
@@ -401,44 +617,58 @@ class MainWindow(QMainWindow):
 
         # Seek bar row
         seek_row = QHBoxLayout()
-        seek_row.setContentsMargins(4, 0, 4, 2)
-        seek_row.setSpacing(4)
+        seek_row.setContentsMargins(2, 2, 2, 2)
+        seek_row.setSpacing(6)
 
-        self.btn_play_pause = QPushButton("▶")
-        self.btn_play_pause.setFixedSize(28, 22)
+        self.btn_play_pause = QToolButton()
+        self.btn_play_pause.setObjectName("previewControlButton")
+        self.btn_play_pause.setFixedSize(34, 34)
+        self.btn_play_pause.setIconSize(QSize(18, 18))
+        self.btn_play_pause.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.btn_play_pause.setAutoRaise(False)
         self.btn_play_pause.setToolTip("Play / Pause")
         seek_row.addWidget(self.btn_play_pause)
 
-        self.btn_mute = QPushButton("🔇")
-        self.btn_mute.setFixedSize(28, 22)
+        self.btn_mute = QToolButton()
+        self.btn_mute.setObjectName("previewControlButton")
+        self.btn_mute.setFixedSize(34, 34)
+        self.btn_mute.setIconSize(QSize(18, 18))
+        self.btn_mute.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.btn_mute.setAutoRaise(False)
         self.btn_mute.setToolTip("Mute / Unmute")
         seek_row.addWidget(self.btn_mute)
 
+        self._set_play_pause_icon(True)
+        self._set_mute_icon(True)
+
         self.vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vol_slider.setObjectName("volumeSlider")
         self.vol_slider.setRange(0, 100)
         self.vol_slider.setValue(100)
-        self.vol_slider.setFixedWidth(80)
+        self.vol_slider.setFixedWidth(96)
         self.vol_slider.setToolTip("Volume")
         seek_row.addWidget(self.vol_slider)
 
         self.lbl_pos = QLabel("0:00")
-        self.lbl_pos.setFixedWidth(42)
+        self.lbl_pos.setFixedWidth(46)
         self.lbl_pos.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         seek_row.addWidget(self.lbl_pos)
 
         self.seek_slider = SeekSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setObjectName("seekSlider")
         self.seek_slider.setRange(0, 10000)
         self.seek_slider.setValue(0)
         seek_row.addWidget(self.seek_slider, 1)
 
         self.lbl_dur = QLabel("0:00")
-        self.lbl_dur.setFixedWidth(42)
+        self.lbl_dur.setFixedWidth(46)
         self.lbl_dur.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         seek_row.addWidget(self.lbl_dur)
 
         pp_layout.addLayout(seek_row)
 
         right_splitter = QSplitter(Qt.Orientation.Vertical)
+        right_splitter.setHandleWidth(8)
         right_splitter.addWidget(self.table)
         right_splitter.addWidget(self.preview_panel)
         right_splitter.setSizes([420, 220])
@@ -471,6 +701,7 @@ class MainWindow(QMainWindow):
         self.preview_check.toggled.connect(self._on_preview_toggle)
         self.table.selectionModel().currentRowChanged.connect(self._on_selection_changed)
         self.seek_slider.sliderPressed.connect(self._on_seek_pressed)
+        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
         self.seek_slider.sliderReleased.connect(self._on_seek_released)
         self.btn_play_pause.clicked.connect(self._on_play_pause_clicked)
         self.btn_mute.clicked.connect(self._on_mute_clicked)
@@ -500,7 +731,7 @@ class MainWindow(QMainWindow):
         self.seek_slider.setValue(0)
         self.lbl_pos.setText("0:00")
         self.lbl_dur.setText("0:00")
-        self.btn_play_pause.setText("▶")
+        self._set_play_pause_icon(True)
         self._scan_folder()
 
     def _on_tree_click(self, idx: QModelIndex):
@@ -821,7 +1052,7 @@ class MainWindow(QMainWindow):
             self.seek_slider.setValue(0)
             self.lbl_pos.setText("0:00")
             self.lbl_dur.setText("0:00")
-            self.btn_play_pause.setText("⏸")
+            self._set_play_pause_icon(False)
             self._mpv.loadfile(path, mode="replace")
         except Exception as e:
             self.status_bar.showMessage(f"Preview error: {e}")
@@ -850,14 +1081,24 @@ class MainWindow(QMainWindow):
     def _on_seek_pressed(self):
         self._seeking = True
 
+    def _seek_to_slider_value(self) -> None:
+        if self._mpv is None or self._mpv_duration <= 0:
+            return
+        target = self.seek_slider.value() / 10000 * self._mpv_duration
+        self._mpv_pos = target
+        self.lbl_pos.setText(fmt_duration(target))
+        try:
+            self._mpv.seek(target, "absolute")
+        except Exception:
+            pass
+
+    def _on_seek_moved(self, _value: int):
+        if self._seeking:
+            self._seek_to_slider_value()
+
     def _on_seek_released(self):
         self._seeking = False
-        if self._mpv is not None and self._mpv_duration > 0:
-            target = self.seek_slider.value() / 10000 * self._mpv_duration
-            try:
-                self._mpv.seek(target, "absolute")
-            except Exception:
-                pass
+        self._seek_to_slider_value()
 
     def _on_play_pause_clicked(self):
         if self._mpv is not None:
@@ -874,11 +1115,11 @@ class MainWindow(QMainWindow):
                 pass
 
     def _on_mpv_pause(self, paused: bool):
-        self.btn_play_pause.setText("▶" if paused else "⏸")
+        self._set_play_pause_icon(paused)
 
     def _on_mpv_mute(self, muted: bool):
         self._mpv_muted = muted
-        self.btn_mute.setText("🔇" if muted else "🔊")
+        self._set_mute_icon(muted)
 
     def _on_vol_slider_changed(self, value: int):
         if self._mpv is not None:
