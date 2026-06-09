@@ -30,5 +30,6 @@ build/
 # Paquetes de distribución
 *.tar.gz
 *.zip
+release/
 
 .claude/
