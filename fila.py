@@ -276,6 +276,15 @@ class MainWindow(QMainWindow):
 
         tb.addWidget(vline())
 
+        tb.addWidget(QLabel("Filter:"))
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("Search files…")
+        self.filter_edit.setFixedWidth(160)
+        self.filter_edit.setClearButtonEnabled(True)
+        tb.addWidget(self.filter_edit)
+
+        tb.addWidget(vline())
+
         self.preview_check = QCheckBox("Preview")
         self.preview_check.setChecked(True)
         tb.addWidget(self.preview_check)
@@ -449,6 +458,7 @@ class MainWindow(QMainWindow):
         self.tree.clicked.connect(self._on_tree_click)
         self.tree.customContextMenuRequested.connect(self._tree_context_menu)
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
+        self.filter_edit.textChanged.connect(self._on_filter_changed)
         self.play_btn.clicked.connect(self._play)
         self.table.cellDoubleClicked.connect(self._on_double_click)
         self.table.customContextMenuRequested.connect(self._table_context_menu)
@@ -528,13 +538,19 @@ class MainWindow(QMainWindow):
         self._render_table()
         self._maybe_fetch_durations()
 
+    def _on_filter_changed(self):
+        self._render_table()
+        self._maybe_fetch_durations()
+
     # ── Rendering ─────────────────────────────────────────────────────────────
 
     def _visible_files(self) -> list[dict]:
         exts = FILE_TYPES[self.type_combo.currentText()]
-        if exts:
-            return [f for f in self._all_files if f["ext"] in exts]
-        return list(self._all_files)
+        needle = self.filter_edit.text().lower()
+        files = self._all_files if not exts else [f for f in self._all_files if f["ext"] in exts]
+        if needle:
+            files = [f for f in files if needle in f["name"].lower()]
+        return files
 
     def _render_table(self):
         files = self._visible_files()
