@@ -1020,11 +1020,13 @@ def main():
     # mpv wid embedding needs X11 window IDs; force XCB so winId() returns a
     # real XID even under Wayland (runs via XWayland transparently).
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    # Let Qt inherit the desktop theme unless the user already chose one.
+    if not os.environ.get("QT_STYLE_OVERRIDE") and not os.environ.get("QT_QPA_PLATFORMTHEME"):
+        os.environ["QT_QPA_PLATFORMTHEME"] = "gtk3"
 
     app = QApplication(sys.argv)
     # QApplication resets LC_NUMERIC via setlocale(LC_ALL,""); restore for mpv.
     locale.setlocale(locale.LC_NUMERIC, "C")
-    app.setStyle("Fusion")
     _icon = Path(__file__).parent / "icon.png"
     if _icon.exists():
         app.setWindowIcon(QIcon(str(_icon)))

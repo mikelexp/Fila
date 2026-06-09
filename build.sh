@@ -65,6 +65,7 @@ python -m nuitka \
     --onefile \
     --onefile-tempdir-spec="{CACHE_DIR}/fila" \
     --enable-plugin=pyside6 \
+    --include-qt-plugins=platforms,platformthemes,iconengines,imageformats,wayland-shell-integration,wayland-decoration-client,wayland-graphics-integration-client,xcbglintegrations \
     --include-data-files=icon.png=icon.png \
     --output-filename=fila \
     --output-dir=dist \
