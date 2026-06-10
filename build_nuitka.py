@@ -53,6 +53,10 @@ def build_command(onefile: bool) -> list[str]:
         "--follow-imports",
         "--python-flag=no_site",
         "--warn-unusual-code",
+        # Avoid bundling OpenSSL, because system libcurl/libmpv expect the distro's
+        # own libssl/libcrypto versions and the bundled copy can cause symbol mismatches.
+        "--noinclude-dlls=libssl.so*",
+        "--noinclude-dlls=libcrypto.so*",
         "--company-name=Mikele",
         "--product-name=Fila",
         "--file-description=Browse folders, filter media, generate playlists, and play files",
@@ -64,7 +68,6 @@ def build_command(onefile: bool) -> list[str]:
     ]
 
     if onefile:
-        command.append('--onefile-tempdir-spec={CACHE_DIR}/fila')
         command.append("--onefile")
 
     return command
