@@ -11,7 +11,7 @@ git tag v1.0.0
 git push github master v1.0.0
 ```
 
-2. GitHub Actions compila `fila.bin`, arma `fila-1.0.0-linux-x86_64.tar.gz` y publica el release.
+2. GitHub Actions compila `fila.bin` dentro de un contenedor Arch Linux, arma `fila-1.0.0-linux-x86_64.tar.gz` y publica el release.
 
 ## 2. AUR (`fila-bin`)
 

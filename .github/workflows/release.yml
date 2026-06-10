@@ -14,26 +14,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install system dependencies
+      - name: Build and package release in Arch container
         run: |
-          sudo apt-get update
-          sudo apt-get install -y patchelf
-
-      - name: Install build dependencies
-        run: |
-          python -m venv venv
-          venv/bin/pip install --upgrade pip
-          venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Build with Nuitka (onefile)
-        run: venv/bin/python build_nuitka.py --clean --onefile
-
-      - name: Package release tarball
-        run: bash scripts/package-release.sh "${GITHUB_REF_NAME#v}"
+          docker run --rm \
+            --pull=always \
+            -e VERSION="${GITHUB_REF_NAME#v}" \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            archlinux:latest \
+            bash -lc '
+              pacman -Sy --noconfirm archlinux-keyring &&
+              pacman -Syu --noconfirm --needed python python-pip git base-devel patchelf mpv ffmpeg &&
+              python -m venv venv &&
+              venv/bin/pip install --upgrade pip &&
+              venv/bin/pip install -r requirements.txt -r requirements-dev.txt &&
+              venv/bin/python build_nuitka.py --clean --onefile &&
+              bash scripts/package-release.sh "$VERSION"
+            '
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

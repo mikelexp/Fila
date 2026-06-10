@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_DIR="$ROOT_DIR/venv"
+VENV_DIR="$ROOT_DIR/.venv"
 PYTHON_CMD="${PYTHON_CMD:-python3.13}"
 
 if ! command -v "$PYTHON_CMD" >/dev/null 2>&1; then

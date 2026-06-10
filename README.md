@@ -82,7 +82,7 @@ git tag v1.0.0
 git push github master v1.0.0
 ```
 
-The workflow builds a release tarball named like `fila-1.0.0-linux-x86_64.tar.gz`.
+The workflow builds a release tarball named like `fila-1.0.0-linux-x86_64.tar.gz` from an Arch Linux build environment so the AUR binary matches Arch system libraries.
 
 ## AUR
 
