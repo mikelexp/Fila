@@ -14,17 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and package release in Arch container
+      - name: Build and package release in Python 3.13 container
         run: |
           docker run --rm \
-            --pull=always \
             -e VERSION="${GITHUB_REF_NAME#v}" \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
-            archlinux:latest \
+            python:3.13-bookworm@sha256:2383bb1108fe80f7191b1f3ddbbd2ce1a13a1e99e7400a42fa28b27defa34841 \
             bash -lc '
-              pacman -Sy --noconfirm archlinux-keyring &&
-              pacman -Syu --noconfirm --needed python python-pip git base-devel patchelf mpv ffmpeg &&
+              apt-get update &&
+              apt-get install -y --no-install-recommends build-essential ffmpeg git mpv patchelf &&
               python -m venv venv &&
               venv/bin/pip install --upgrade pip &&
               venv/bin/pip install -r requirements.txt -r requirements-dev.txt &&
