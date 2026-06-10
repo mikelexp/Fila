@@ -15,7 +15,7 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 import send2trash
 import mpv
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer, QSize
+from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer, QSize, QEvent
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -277,6 +277,46 @@ class MainWindow(QMainWindow):
             QStyle.StandardPixmap.SP_MediaVolumeMuted if muted else QStyle.StandardPixmap.SP_MediaVolume
         )
         self.btn_mute.setIcon(icon)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress and self._is_descendant(obj, self.preview_panel):
+            self.preview_panel.setFocus()
+
+        if event.type() == QEvent.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            key = event.key()
+            focus = QApplication.focusWidget()
+            if focus is not None:
+                in_preview = self._is_descendant(focus, self.preview_panel)
+                in_table = self._is_descendant(focus, self.table)
+
+                if key in (Qt.Key.Key_Left, Qt.Key.Key_Right) and (in_preview or in_table):
+                    self._seek_relative(-15 if key == Qt.Key.Key_Left else 15)
+                    return True
+
+        return super().eventFilter(obj, event)
+
+    def _is_descendant(self, widget, ancestor) -> bool:
+        current = widget
+        while current is not None:
+            if current is ancestor:
+                return True
+            parent = getattr(current, "parentWidget", None)
+            current = parent() if callable(parent) else None
+        return False
+
+    def _seek_relative(self, delta: float) -> None:
+        if self._mpv is None:
+            return
+        try:
+            if self._mpv_duration > 0:
+                target = max(0.0, min(self._mpv_pos + delta, self._mpv_duration))
+                self._mpv_pos = target
+                self.lbl_pos.setText(fmt_duration(target))
+                self._mpv.seek(target, "absolute")
+            else:
+                self._mpv.seek(delta, "relative")
+        except Exception:
+            pass
 
     # ── Build UI ──────────────────────────────────────────────────────────────
 
@@ -604,6 +644,7 @@ class MainWindow(QMainWindow):
         # ── Preview panel (video area + seek bar) ────────────────────────────
         self.preview_panel = QWidget()
         self.preview_panel.setObjectName("previewPane")
+        self.preview_panel.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         pp_layout = QVBoxLayout(self.preview_panel)
         pp_layout.setContentsMargins(6, 6, 6, 6)
         pp_layout.setSpacing(8)
@@ -612,6 +653,7 @@ class MainWindow(QMainWindow):
         self.preview_container = QWidget()
         self.preview_container.setMinimumHeight(60)
         self.preview_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.preview_container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.preview_container.setStyleSheet("background: black;")
         pp_layout.addWidget(self.preview_container, 1)
 
@@ -1272,6 +1314,7 @@ def main():
     if _icon.exists():
         app.setWindowIcon(QIcon(str(_icon)))
     win = MainWindow()
+    app.installEventFilter(win)
     if _load_config().get("maximized", False):
         win.showMaximized()
     else:
