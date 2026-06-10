@@ -1,4 +1,4 @@
-PYTHON := venv/bin/python
+PYTHON := .venv/bin/python
 SCRIPTS := scripts
 
 .PHONY: help run install-deps build-standalone build-onefile clean clean-build install uninstall uninstall-purge package-release aur-update
@@ -30,7 +30,7 @@ build-onefile: $(PYTHON)
 	@bash $(SCRIPTS)/build-onefile.sh
 
 clean:
-	rm -rf venv build dist
+	rm -rf .venv build dist
 
 clean-build:
 	@bash $(SCRIPTS)/clean-build.sh

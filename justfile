@@ -1,4 +1,4 @@
-python := 'venv/bin/python'
+python := '.venv/bin/python'
 scripts := 'scripts'
 
 default:
@@ -20,7 +20,7 @@ build-onefile: _ensure-python
     bash {{scripts}}/build-onefile.sh
 
 clean:
-    rm -rf venv build dist
+    rm -rf .venv build dist
 
 clean-build:
     bash {{scripts}}/clean-build.sh
