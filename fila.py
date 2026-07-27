@@ -1073,7 +1073,6 @@ class MainWindow(QMainWindow):
             self.seek_slider.setValue(0)
             self.lbl_pos.setText("0:00")
             self.lbl_dur.setText("0:00")
-            self._set_play_pause_icon(False)
             self._mpv.loadfile(path, mode="replace")
         except Exception as e:
             self.status_bar.showMessage(f"Preview error: {e}")
@@ -1084,6 +1083,7 @@ class MainWindow(QMainWindow):
                 self._mpv.stop()
             except Exception:
                 pass
+        self._set_play_pause_icon(True)
 
     # ── Seek bar ──────────────────────────────────────────────────────────────
 
@@ -1124,7 +1124,9 @@ class MainWindow(QMainWindow):
     def _on_play_pause_clicked(self):
         if self._mpv is not None:
             try:
-                self._mpv.pause = not self._mpv.pause
+                # Let mpv toggle its own state; reading pause here can be stale
+                # while the previous command is still being processed.
+                self._mpv.command("cycle", "pause")
             except Exception:
                 pass
 
