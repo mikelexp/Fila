@@ -15,8 +15,11 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 import send2trash
 import mpv
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer, QSize, QEvent
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import (
+    Qt, QObject, QThread, Signal, QModelIndex, QDir, QPoint, QTimer, QSize,
+    QEvent, QLibraryInfo, QSettings, qVersion,
+)
+from PySide6.QtGui import QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QTreeView, QComboBox, QLabel, QPushButton,
@@ -330,7 +333,6 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QWidget#topBar,
-            QWidget#leftPane,
             QWidget#previewPane,
             QTreeView#folderTree,
             QListWidget#favoritesList,
@@ -338,10 +340,6 @@ class MainWindow(QMainWindow):
                 background: palette(window);
                 border: 1px solid palette(mid);
                 border-radius: 7px;
-            }
-
-            QWidget#topBar {
-                padding: 6px;
             }
 
             QTableWidget#fileTable,
@@ -473,25 +471,6 @@ class MainWindow(QMainWindow):
                 border: 1px solid palette(mid);
             }
 
-            QSplitter::handle:horizontal {
-                background: palette(button);
-                border: 1px solid palette(mid);
-                margin: 2px 0;
-                min-height: 8px;
-                border-radius: 4px;
-            }
-
-            QSplitter::handle:vertical {
-                background: palette(button);
-                border: 1px solid palette(mid);
-                margin: 0 2px;
-                min-width: 8px;
-                border-radius: 4px;
-            }
-
-            QSplitter::handle:hover {
-                background: palette(midlight);
-            }
             """
         )
 
@@ -556,23 +535,23 @@ class MainWindow(QMainWindow):
 
         # Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(8)
+        splitter.setHandleWidth(5)
 
         # ── Left panel: favorites + folder tree ──────────────────────────────
         left = QWidget()
         left.setObjectName("leftPane")
         left.setMinimumWidth(200)
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(6, 6, 6, 6)
-        left_layout.setSpacing(6)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
         left_splitter = QSplitter(Qt.Orientation.Vertical)
-        left_splitter.setHandleWidth(8)
+        left_splitter.setHandleWidth(5)
 
         # Favorites section
         fav_widget = QWidget()
         fav_widget_layout = QVBoxLayout(fav_widget)
-        fav_widget_layout.setContentsMargins(4, 4, 4, 4)
+        fav_widget_layout.setContentsMargins(0, 0, 0, 0)
         fav_widget_layout.setSpacing(4)
 
         fav_header = QHBoxLayout()
@@ -710,7 +689,7 @@ class MainWindow(QMainWindow):
         pp_layout.addLayout(seek_row)
 
         right_splitter = QSplitter(Qt.Orientation.Vertical)
-        right_splitter.setHandleWidth(8)
+        right_splitter.setHandleWidth(5)
         right_splitter.addWidget(self.table)
         right_splitter.addWidget(self.preview_panel)
         right_splitter.setSizes([420, 220])
@@ -1297,22 +1276,146 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+# ── Qt/desktop integration ─────────────────────────────────────────────────────
+
+APP_NAME = "Fila"
+_SYSTEM_QT_PLUGIN_PATHS = (
+    "/usr/lib/qt6/plugins",
+    "/usr/lib64/qt6/plugins",
+    "/usr/lib/x86_64-linux-gnu/qt6/plugins",
+)
+
+
+def _running_on_kde() -> bool:
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+    session = os.environ.get("DESKTOP_SESSION", "")
+    return "kde" in f"{desktop}:{session}".lower() or bool(os.environ.get("KDE_FULL_SESSION"))
+
+
+def _qt_version_compatible() -> bool:
+    """Avoid loading a system style built for a different Qt ABI."""
+    commands = (("qtpaths6", "--qt-version"), ("qmake6", "-query", "QT_VERSION"))
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=1, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        system_version = result.stdout.strip()
+        if system_version:
+            return system_version.split(".")[:2] == qVersion().split(".")[:2]
+    return False
+
+
+def _plasma_widget_style() -> str:
+    settings_path = Path.home() / ".config" / "kdeglobals"
+    if settings_path.is_file():
+        style = QSettings(
+            str(settings_path), QSettings.Format.IniFormat
+        ).value("KDE/widgetStyle", "", type=str).strip()
+        if style:
+            return style
+    try:
+        result = subprocess.run(
+            ["kreadconfig6", "--group", "KDE", "--key", "widgetStyle"],
+            capture_output=True, text=True, timeout=1, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
+
+
+def _configure_plugin_path() -> None:
+    bundled = str(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))
+    configured = [bundled]
+    configured.extend(os.environ.get("QT_PLUGIN_PATH", "").split(os.pathsep))
+
+    for candidate in _SYSTEM_QT_PLUGIN_PATHS:
+        system_path = Path(candidate)
+        if not system_path.is_dir() or not _qt_version_compatible():
+            continue
+        has_kde_plugin = any((system_path / "platformthemes").glob("*kde*.so"))
+        has_style_plugin = (system_path / "styles" / "breeze6.so").is_file()
+        if has_kde_plugin or has_style_plugin:
+            configured.append(candidate)
+            break
+
+    paths = []
+    for path in configured:
+        if path and path not in paths:
+            paths.append(path)
+    os.environ["QT_PLUGIN_PATH"] = os.pathsep.join(paths)
+
+
+def configure_qt_theme() -> str:
+    """Configure Qt before QApplication while respecting explicit user choices."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    user_style = "QT_STYLE_OVERRIDE" in os.environ
+    user_platform_theme = "QT_QPA_PLATFORMTHEME" in os.environ
+    kde = _running_on_kde()
+
+    _configure_plugin_path()
+
+    if not user_platform_theme:
+        os.environ["QT_QPA_PLATFORMTHEME"] = "kde" if kde else "gtk3"
+    if kde and not user_style:
+        style = _plasma_widget_style()
+        if style:
+            os.environ["QT_STYLE_OVERRIDE"] = style
+
+    if user_style or user_platform_theme:
+        return "user override"
+    if kde and "QT_STYLE_OVERRIDE" in os.environ:
+        return f"kde/{os.environ['QT_STYLE_OVERRIDE']}"
+    return os.environ["QT_QPA_PLATFORMTHEME"]
+
+
+def ensure_placeholder_text_contrast(app: QApplication) -> None:
+    palette = app.palette()
+    base = palette.color(QPalette.ColorRole.Base)
+    placeholder = palette.color(QPalette.ColorRole.PlaceholderText)
+    text = palette.color(QPalette.ColorRole.Text)
+    distance = sum(
+        abs(a - b)
+        for a, b in zip(base.getRgb()[:3], placeholder.getRgb()[:3])
+    )
+    if distance < 45:
+        placeholder = text
+        placeholder.setAlpha(160)
+        palette.setColor(
+            QPalette.ColorGroup.Active,
+            QPalette.ColorRole.PlaceholderText,
+            placeholder,
+        )
+        palette.setColor(
+            QPalette.ColorGroup.Inactive,
+            QPalette.ColorRole.PlaceholderText,
+            placeholder,
+        )
+        app.setPalette(palette)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
     # mpv wid embedding needs X11 window IDs; force XCB so winId() returns a
     # real XID even under Wayland (runs via XWayland transparently).
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-    # Let Qt inherit the desktop theme unless the user already chose one.
-    if not os.environ.get("QT_STYLE_OVERRIDE") and not os.environ.get("QT_QPA_PLATFORMTHEME"):
-        os.environ["QT_QPA_PLATFORMTHEME"] = "gtk3"
-
+    theme_mode = configure_qt_theme()
+    QApplication.setApplicationName(APP_NAME)
     app = QApplication(sys.argv)
+    ensure_placeholder_text_contrast(app)
     # QApplication resets LC_NUMERIC via setlocale(LC_ALL,""); restore for mpv.
     locale.setlocale(locale.LC_NUMERIC, "C")
     _icon = Path(__file__).parent / "icon.png"
     if _icon.exists():
         app.setWindowIcon(QIcon(str(_icon)))
+    print(
+        f"Fila Qt theme: {theme_mode}; "
+        f"platform={os.environ.get('QT_QPA_PLATFORMTHEME', '')}; "
+        f"style={os.environ.get('QT_STYLE_OVERRIDE', '') or app.style().objectName()}; "
+        f"runtime={app.style().objectName()}"
+    )
     win = MainWindow()
     app.installEventFilter(win)
     if _load_config().get("maximized", False):
