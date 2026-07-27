@@ -348,127 +348,12 @@ class MainWindow(QMainWindow):
                 background-color: palette(base);
             }
 
-            QWidget#topBar QLineEdit,
-            QWidget#topBar QComboBox {
-                background: palette(base);
-                border: 1px solid palette(mid);
-                border-radius: 6px;
-                padding: 4px 8px;
-                min-height: 22px;
-            }
-
-            QWidget#topBar QComboBox::drop-down {
-                border: 0;
-                width: 22px;
-            }
-
-            QWidget#topBar QComboBox QAbstractItemView {
-                background: palette(base);
-                selection-background-color: palette(highlight);
-                selection-color: palette(highlighted-text);
-                border: 1px solid palette(mid);
-            }
-
-            QWidget#topBar QPushButton {
-                background: palette(button);
-                border: 1px solid palette(mid);
-                border-radius: 6px;
-                padding: 0 10px;
-                min-height: 26px;
-            }
-
-            QWidget#topBar QPushButton:hover {
-                background: palette(light);
-            }
-
-            QWidget#topBar QPushButton:pressed {
+            QSplitter::handle {
                 background: palette(mid);
             }
 
-            QWidget#topBar QCheckBox {
-                spacing: 6px;
-            }
-
-            QWidget#topBar QCheckBox::indicator {
-                width: 14px;
-                height: 14px;
-            }
-
-            QPushButton#playButton,
-            QToolButton#previewControlButton {
-                background: palette(button);
-                border: 1px solid palette(mid);
-                border-radius: 7px;
-                padding: 0 8px;
-            }
-
-            QPushButton#playButton:hover,
-            QToolButton#previewControlButton:hover {
-                background: palette(light);
-            }
-
-            QPushButton#playButton:pressed,
-            QToolButton#previewControlButton:pressed {
-                background: palette(mid);
-            }
-
-            QPushButton#playButton {
-                font-weight: 600;
-            }
-
-            QSlider#seekSlider::groove:horizontal {
-                height: 6px;
-                border-radius: 3px;
-                background: palette(button);
-                border: 1px solid palette(mid);
-                margin: 0 4px;
-            }
-
-            QSlider#seekSlider::sub-page:horizontal {
-                border-radius: 3px;
+            QSplitter::handle:hover {
                 background: palette(highlight);
-            }
-
-            QSlider#seekSlider::add-page:horizontal {
-                border-radius: 3px;
-                background: palette(light);
-            }
-
-            QSlider#seekSlider::handle:horizontal {
-                width: 16px;
-                margin: -6px 0;
-                border-radius: 8px;
-                background: palette(highlight);
-                border: 2px solid palette(window);
-            }
-
-            QSlider#seekSlider::handle:horizontal:hover {
-                background: palette(midlight);
-            }
-
-            QSlider#volumeSlider::groove:horizontal {
-                height: 4px;
-                border-radius: 2px;
-                background: palette(button);
-                border: 1px solid palette(mid);
-            }
-
-            QSlider#volumeSlider::sub-page:horizontal {
-                border-radius: 2px;
-                background: palette(highlight);
-            }
-
-            QSlider#volumeSlider::add-page:horizontal {
-                border-radius: 2px;
-                background: palette(light);
-            }
-
-            QSlider#volumeSlider::handle:horizontal {
-                width: 12px;
-                margin: -5px 0;
-                border-radius: 6px;
-                background: palette(button);
-                border: 1px solid palette(mid);
             }
 
             """
@@ -535,7 +420,7 @@ class MainWindow(QMainWindow):
 
         # Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(5)
+        splitter.setHandleWidth(7)
 
         # ── Left panel: favorites + folder tree ──────────────────────────────
         left = QWidget()
@@ -546,7 +431,7 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(0)
 
         left_splitter = QSplitter(Qt.Orientation.Vertical)
-        left_splitter.setHandleWidth(5)
+        left_splitter.setHandleWidth(7)
 
         # Favorites section
         fav_widget = QWidget()
@@ -562,12 +447,10 @@ class MainWindow(QMainWindow):
         fav_header.addWidget(fav_lbl)
         fav_header.addStretch()
         self.btn_add_fav = QPushButton("+ Add")
-        self.btn_add_fav.setFixedHeight(22)
         self.btn_add_fav.setToolTip("Add current folder to bookmarks")
         fav_header.addWidget(self.btn_add_fav)
 
         self.btn_rename_fav = QPushButton("Rename")
-        self.btn_rename_fav.setFixedHeight(22)
         self.btn_rename_fav.setToolTip("Rename selected bookmark")
         self.btn_rename_fav.setEnabled(False)
         fav_header.addWidget(self.btn_rename_fav)
@@ -689,7 +572,7 @@ class MainWindow(QMainWindow):
         pp_layout.addLayout(seek_row)
 
         right_splitter = QSplitter(Qt.Orientation.Vertical)
-        right_splitter.setHandleWidth(5)
+        right_splitter.setHandleWidth(7)
         right_splitter.addWidget(self.table)
         right_splitter.addWidget(self.preview_panel)
         right_splitter.setSizes([420, 220])
