@@ -1189,7 +1189,10 @@ def _qt_version_compatible() -> bool:
             continue
         system_version = result.stdout.strip()
         if system_version:
-            return system_version.split(".")[:2] == qVersion().split(".")[:2]
+            # Qt plugins can depend on patch-level private ABI details.  A
+            # matching major/minor version is not sufficient for a bundled
+            # PySide6 installation.
+            return system_version == qVersion()
     return False
 
 
@@ -1211,18 +1214,26 @@ def _plasma_widget_style() -> str:
     return result.stdout.strip()
 
 
-def _configure_plugin_path() -> None:
+def _configure_plugin_path() -> tuple[bool, bool]:
     bundled = str(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))
     configured = [bundled]
     configured.extend(os.environ.get("QT_PLUGIN_PATH", "").split(os.pathsep))
+    has_kde_theme = False
+    has_gtk3_theme = False
 
     for candidate in _SYSTEM_QT_PLUGIN_PATHS:
         system_path = Path(candidate)
         if not system_path.is_dir() or not _qt_version_compatible():
             continue
-        has_kde_plugin = any((system_path / "platformthemes").glob("*kde*.so"))
-        has_style_plugin = (system_path / "styles" / "breeze6.so").is_file()
-        if has_kde_plugin or has_style_plugin:
+        platformthemes = system_path / "platformthemes"
+        styles = system_path / "styles"
+        has_kde_theme = any(
+            "kde" in plugin.name.lower() and plugin.suffix == ".so"
+            for plugin in platformthemes.glob("*")
+        )
+        has_gtk3_theme = (platformthemes / "libqgtk3.so").is_file()
+        has_style_plugin = (styles / "breeze6.so").is_file()
+        if has_kde_theme or has_gtk3_theme or has_style_plugin:
             configured.append(candidate)
             break
 
@@ -1231,6 +1242,7 @@ def _configure_plugin_path() -> None:
         if path and path not in paths:
             paths.append(path)
     os.environ["QT_PLUGIN_PATH"] = os.pathsep.join(paths)
+    return has_kde_theme, has_gtk3_theme
 
 
 def configure_qt_theme() -> str:
@@ -1240,11 +1252,11 @@ def configure_qt_theme() -> str:
     user_platform_theme = "QT_QPA_PLATFORMTHEME" in os.environ
     kde = _running_on_kde()
 
-    _configure_plugin_path()
+    has_kde_theme, has_gtk3_theme = _configure_plugin_path()
 
-    if not user_platform_theme:
+    if not user_platform_theme and ((kde and has_kde_theme) or (not kde and has_gtk3_theme)):
         os.environ["QT_QPA_PLATFORMTHEME"] = "kde" if kde else "gtk3"
-    if kde and not user_style:
+    if kde and has_kde_theme and not user_style:
         style = _plasma_widget_style()
         if style:
             os.environ["QT_STYLE_OVERRIDE"] = style
@@ -1253,7 +1265,7 @@ def configure_qt_theme() -> str:
         return "user override"
     if kde and "QT_STYLE_OVERRIDE" in os.environ:
         return f"kde/{os.environ['QT_STYLE_OVERRIDE']}"
-    return os.environ["QT_QPA_PLATFORMTHEME"]
+    return os.environ.get("QT_QPA_PLATFORMTHEME", "built-in")
 
 
 def ensure_placeholder_text_contrast(app: QApplication) -> None:
@@ -1281,6 +1293,23 @@ def ensure_placeholder_text_contrast(app: QApplication) -> None:
         app.setPalette(palette)
 
 
+def report_qt_theme(app: QApplication, configured_mode: str) -> None:
+    """Report configured and effective Qt integration without masking failures."""
+    runtime_style = app.style().objectName()
+    expected_style = os.environ.get("QT_STYLE_OVERRIDE", "")
+    if expected_style and runtime_style.lower() in {"fusion", "windows"}:
+        print(
+            f"Fila Qt warning: requested style {expected_style!r} was not loaded; "
+            f"using {runtime_style!r}",
+            file=sys.stderr,
+        )
+    print(
+        f"Fila Qt theme: {configured_mode}; "
+        f"platform={os.environ.get('QT_QPA_PLATFORMTHEME', '')}; "
+        f"style={expected_style}; runtime={runtime_style}"
+    )
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -1295,12 +1324,7 @@ def main():
     _icon = Path(__file__).parent / "icon.png"
     if _icon.exists():
         app.setWindowIcon(QIcon(str(_icon)))
-    print(
-        f"Fila Qt theme: {theme_mode}; "
-        f"platform={os.environ.get('QT_QPA_PLATFORMTHEME', '')}; "
-        f"style={os.environ.get('QT_STYLE_OVERRIDE', '') or app.style().objectName()}; "
-        f"runtime={app.style().objectName()}"
-    )
+    report_qt_theme(app, theme_mode)
     win = MainWindow()
     app.installEventFilter(win)
     if _load_config().get("maximized", False):
