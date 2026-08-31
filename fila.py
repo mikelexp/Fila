@@ -374,7 +374,9 @@ class MainWindow(QMainWindow):
 
         self.btn_go = QPushButton("Go")
         self.btn_go.setObjectName("topActionButton")
-        self.btn_go.setFixedWidth(40)
+        self.btn_go.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowRight))
+        self.btn_go.setIconSize(QSize(16, 16))
+        self.btn_go.setFixedWidth(64)
         self.btn_go.setFixedHeight(30)
         tb.addWidget(self.btn_go)
 
@@ -446,11 +448,15 @@ class MainWindow(QMainWindow):
         fav_lbl.setFont(fav_lbl_font)
         fav_header.addWidget(fav_lbl)
         fav_header.addStretch()
-        self.btn_add_fav = QPushButton("+ Add")
+        self.btn_add_fav = QPushButton("Add")
+        self.btn_add_fav.setIcon(QIcon.fromTheme("list-add"))
+        self.btn_add_fav.setIconSize(QSize(16, 16))
         self.btn_add_fav.setToolTip("Add current folder to bookmarks")
         fav_header.addWidget(self.btn_add_fav)
 
         self.btn_rename_fav = QPushButton("Rename")
+        self.btn_rename_fav.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.btn_rename_fav.setIconSize(QSize(16, 16))
         self.btn_rename_fav.setToolTip("Rename selected bookmark")
         self.btn_rename_fav.setEnabled(False)
         fav_header.addWidget(self.btn_rename_fav)
