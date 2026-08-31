@@ -198,34 +198,49 @@ def vline() -> QFrame:
 # ── Seek slider that jumps to click position ─────────────────────────────────
 
 class SeekSlider(QSlider):
+    def _value_from_position(self, x: int) -> int:
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        groove = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            opt,
+            QStyle.SubControl.SC_SliderGroove,
+            self,
+        )
+        position = max(0, min(groove.width(), x - groove.x()))
+        return QStyle.sliderValueFromPosition(
+            self.minimum(), self.maximum(), position, max(1, groove.width())
+        )
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            opt = QStyleOptionSlider()
-            self.initStyleOption(opt)
-            if self.style().hitTestComplexControl(
-                QStyle.ComplexControl.CC_Slider,
-                opt,
-                event.position().toPoint(),
-                self,
-            ) == QStyle.SubControl.SC_SliderHandle:
-                super().mousePressEvent(event)
-                return
-
-            groove = self.style().subControlRect(
-                QStyle.ComplexControl.CC_Slider,
-                opt,
-                QStyle.SubControl.SC_SliderGroove,
-                self,
+            # Start dragging from the clicked point, not only from the handle.
+            self.sliderPressed.emit()
+            self.setSliderDown(True)
+            self.setSliderPosition(
+                self._value_from_position(event.position().toPoint().x())
             )
-            x = event.position().toPoint().x() - groove.x()
-            val = QStyle.sliderValueFromPosition(
-                self.minimum(), self.maximum(), x, max(1, groove.width())
-            )
-            self.setValue(val)
             event.accept()
             return
 
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.isSliderDown() and (event.buttons() & Qt.MouseButton.LeftButton):
+            self.setSliderPosition(
+                self._value_from_position(event.position().toPoint().x())
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.isSliderDown():
+            self.setSliderDown(False)
+            self.sliderReleased.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 # ── Thread-safe bridge for mpv → Qt signals ──────────────────────────────────
