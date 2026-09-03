@@ -25,6 +25,13 @@ System dependencies required: `mpv`, `libmpv` (for embedded preview), `ffmpeg`/`
 
 Python dependencies: `PySide6`, `python-mpv`, `send2trash` (see `requirements.txt`).
 
+## Release
+
+- The current stable release is `v0.2.3`.
+- Application versions come from Git tags in the `vX.Y.Z` format. `build_nuitka.py` uses the latest matching tag for the binary metadata and falls back to `0.2.0` when no tag exists.
+- Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds and publishes the GitHub release tarball.
+- After the GitHub release is available, update the AUR `fila-bin` package with `bash scripts/aur-update.sh X.Y.Z`.
+
 ## Architecture
 
 The entire application lives in a single file: `fila.py`.

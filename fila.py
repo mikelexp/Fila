@@ -26,8 +26,8 @@ from PySide6.QtWidgets import (
     QToolButton,
     QFileSystemModel, QHeaderView, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QStatusBar, QLineEdit, QFrame, QMessageBox,
-    QListWidget, QListWidgetItem, QMenu, QCheckBox, QSlider, QStyle, QStyleOptionSlider,
-    QInputDialog,
+    QListWidget, QListWidgetItem, QMenu, QCheckBox, QSlider, QSpinBox, QStyle,
+    QStyleOptionSlider, QInputDialog,
 )
 
 # ── File type definitions ─────────────────────────────────────────────────────
@@ -268,7 +268,13 @@ class MainWindow(QMainWindow):
         self._dur_cache: dict[str, float] = {}
         self._worker: DurationWorker | None = None
         self._current_folder: str = ""
-        self._favorites: list[str] = _load_config().get("favorites", [])
+        config = _load_config()
+        self._favorites: list[str] = config.get("favorites", [])
+        self._scan_subfolders: bool = bool(config.get("scan_subfolders", False))
+        try:
+            self._max_depth: int = max(1, int(config.get("max_depth", 1)))
+        except (TypeError, ValueError):
+            self._max_depth = 1
         self._mpv: mpv.MPV | None = None
         self._mpv_bridge = _MpvBridge()
         self._mpv_duration: float = 0.0
@@ -414,6 +420,23 @@ class MainWindow(QMainWindow):
         self.filter_edit.setFixedWidth(160)
         self.filter_edit.setClearButtonEnabled(True)
         tb.addWidget(self.filter_edit)
+
+        tb.addWidget(vline())
+
+        self.scan_subfolders_check = QCheckBox("Scan subfolders")
+        self.scan_subfolders_check.setChecked(self._scan_subfolders)
+        self.scan_subfolders_check.setMinimumHeight(30)
+        self.scan_subfolders_check.setToolTip("Include files in subfolders")
+        tb.addWidget(self.scan_subfolders_check)
+
+        tb.addWidget(QLabel("Max depth:"))
+        self.max_depth_spin = QSpinBox()
+        self.max_depth_spin.setRange(1, 1000)
+        self.max_depth_spin.setValue(self._max_depth)
+        self.max_depth_spin.setMinimumHeight(30)
+        self.max_depth_spin.setEnabled(self._scan_subfolders)
+        self.max_depth_spin.setToolTip("Maximum subfolder depth to scan")
+        tb.addWidget(self.max_depth_spin)
 
         tb.addWidget(vline())
 
@@ -614,6 +637,8 @@ class MainWindow(QMainWindow):
         self.tree.customContextMenuRequested.connect(self._tree_context_menu)
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
         self.filter_edit.textChanged.connect(self._on_filter_changed)
+        self.scan_subfolders_check.toggled.connect(self._on_scan_subfolders_changed)
+        self.max_depth_spin.valueChanged.connect(self._on_max_depth_changed)
         self.play_btn.clicked.connect(self._play)
         self.table.cellDoubleClicked.connect(self._on_double_click)
         self.table.customContextMenuRequested.connect(self._table_context_menu)
@@ -667,28 +692,53 @@ class MainWindow(QMainWindow):
     def _scan_folder(self):
         self._stop_worker()
         files = []
-        try:
-            for entry in os.scandir(self._current_folder):
-                if not entry.is_file(follow_symlinks=True):
+        folders = [(self._current_folder, 0)]
+        max_depth = self._max_depth if self._scan_subfolders else 0
+
+        while folders:
+            folder, depth = folders.pop()
+            try:
+                entries = list(os.scandir(folder))
+            except PermissionError:
+                if folder == self._current_folder:
+                    self.status_bar.showMessage(f"Permission denied: {self._current_folder}")
+                    return
+                continue
+
+            for entry in entries:
+                try:
+                    if entry.is_file(follow_symlinks=True):
+                        stat = entry.stat()
+                        files.append({
+                            "path":     entry.path,
+                            "name":     entry.name,
+                            "ext":      Path(entry.name).suffix.lower(),
+                            "size":     stat.st_size,
+                            "ctime":    stat.st_ctime,
+                            "duration": self._dur_cache.get(entry.path, -1),
+                        })
+                    elif depth < max_depth and entry.is_dir(follow_symlinks=False):
+                        folders.append((entry.path, depth + 1))
+                except OSError:
                     continue
-                stat = entry.stat()
-                files.append({
-                    "path":     entry.path,
-                    "name":     entry.name,
-                    "ext":      Path(entry.name).suffix.lower(),
-                    "size":     stat.st_size,
-                    "ctime":    stat.st_ctime,
-                    "duration": self._dur_cache.get(entry.path, -1),
-                })
-        except PermissionError:
-            self.status_bar.showMessage(f"Permission denied: {self._current_folder}")
-            return
 
         self._all_files = files
         self._render_table()
         self._maybe_fetch_durations()
         self.table.clearSelection()
         self.table.setCurrentIndex(self.table.model().index(-1, -1))
+
+    def _on_scan_subfolders_changed(self, checked: bool):
+        self._scan_subfolders = checked
+        self.max_depth_spin.setEnabled(checked)
+        _update_config(scan_subfolders=checked)
+        self._scan_folder()
+
+    def _on_max_depth_changed(self, depth: int):
+        self._max_depth = depth
+        _update_config(max_depth=depth)
+        if self._scan_subfolders:
+            self._scan_folder()
 
     def _on_type_changed(self):
         self._render_table()
