@@ -1,7 +1,7 @@
 PYTHON := .venv/bin/python
 SCRIPTS := scripts
 
-.PHONY: help run install-deps build-standalone build-onefile clean clean-build install uninstall uninstall-purge package-release aur-update
+.PHONY: help run install-deps build-standalone build-onefile clean clean-build install uninstall uninstall-purge package-release aur-update publish
 
 help:
 	@echo "Targets:"
@@ -16,6 +16,7 @@ help:
 	@echo "  uninstall-purge  Remove app + all data (settings, icons, cache)"
 	@echo "  package-release  Build the GitHub release tarball"
 	@echo "  aur-update       Update the AUR package from the latest release"
+	@echo "  publish          Full release: GitHub tag+build and AUR update (VERSION=vX.X.X or X.X.X)"
 
 run: $(PYTHON)
 	$(PYTHON) fila.py
@@ -49,6 +50,9 @@ package-release: build-onefile
 
 aur-update:
 	@bash $(SCRIPTS)/aur-update.sh $(VERSION)
+
+publish:
+	@bash $(SCRIPTS)/publish.sh $(VERSION)
 
 $(PYTHON):
 	$(MAKE) install-deps

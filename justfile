@@ -40,5 +40,9 @@ package-release VERSION='': build-onefile
 aur-update VERSION='':
     bash {{scripts}}/aur-update.sh "{{VERSION}}"
 
+# Publica una release: tag + build de GitHub + AUR. Versión como vX.X.X o X.X.X
+publish VERSION:
+    bash {{scripts}}/publish.sh "{{VERSION}}"
+
 _ensure-python:
     @if [ ! -f '{{python}}' ]; then just install-deps; fi
